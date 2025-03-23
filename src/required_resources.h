@@ -41,7 +41,7 @@ public:
 
   // This is only used in the case that for some reason there is no helper
   // registered for the specific instance.
-  HelperErrorInfo() : func_id(-1), line(0), column(0) {};
+  HelperErrorInfo() : func_id(-1), line(0), column(0){};
 
   const int func_id;
   const std::string filename;
@@ -82,10 +82,34 @@ private:
   }
 };
 
+struct TSeriesArgs {
+  long interval_ns = -1;
+  long buckets = -1;
+  SizedType inner_type;
+
+  bool operator==(const TSeriesArgs &other)
+  {
+    return interval_ns == other.interval_ns && buckets == other.buckets;
+  }
+  bool operator!=(const TSeriesArgs &other)
+  {
+    return !(*this == other);
+  }
+
+private:
+  friend class cereal::access;
+  template <typename Archive>
+  void serialize(Archive &archive)
+  {
+    archive(interval_ns, buckets);
+  }
+};
+
 struct MapInfo {
   SizedType key_type;
   SizedType value_type;
   std::optional<LinearHistogramArgs> lhist_args;
+  std::optional<TSeriesArgs> tseries_args;
   std::optional<int> hist_bits_arg;
   int id = -1;
   int max_entries = -1;
@@ -99,6 +123,7 @@ private:
     archive(key_type,
             value_type,
             lhist_args,
+            tseries_args,
             hist_bits_arg,
             id,
             max_entries,

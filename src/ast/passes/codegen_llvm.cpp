@@ -1071,7 +1071,170 @@ ScopedExpr CodegenLLVM::visit(Call &call)
         ctx_, map, scoped_key.value(), b_.getInt64(1), call.loc);
 
     return ScopedExpr();
+  } else if (call.func == "tseries") {
+    Map &map = *call.map;
+    auto map_info = bpftrace_.resources.maps_info.find(map.ident);
+    if (map_info == bpftrace_.resources.maps_info.end()) {
+      LOG(BUG) << "map name: \"" << map.ident << "\" not found";
+    }
 
+    auto *value_arg = call.vargs.at(0);
+    auto value_type = value_arg->type;
+    AllocaInst *value = b_.CreateAllocaBPF(b_.getInt64Ty(), "value");
+    llvm::Function *parent = b_.GetInsertBlock()->getParent();
+    BasicBlock *merge_block = BasicBlock::Create(module_->getContext(),
+                                                 "merge",
+                                                 parent);
+
+    if (value_type.IsIntegerTy()) {
+      // Integer types are simple; just record the value to the current bucket.
+      ScopedExpr scoped_expr = visit(value_arg);
+      b_.CreateStore(b_.CreateIntCast(scoped_expr.value(),
+                                      b_.getInt64Ty(),
+                                      call.vargs.front()->type.IsSigned()),
+                     value);
+    } else if (value_arg->is_map) {
+      // Non-integer maps (max_t, min_t, avg_t, sum_t, and count_t)
+      Map &val_map = static_cast<Map &>(*value_arg);
+      ScopedExpr scoped_key = getMapKey(val_map);
+      CallInst *lookup = b_.CreateMapLookup(val_map, scoped_key.value());
+      BasicBlock *lookup_success_block = BasicBlock::Create(
+          module_->getContext(), "lookup_success", parent);
+      BasicBlock *lookup_failure_block = BasicBlock::Create(
+          module_->getContext(), "lookup_failure", parent);
+      BasicBlock *update_bucket_block = BasicBlock::Create(
+          module_->getContext(), "update_bucket", parent);
+
+      b_.CreateCondBr(
+          b_.CreateICmpNE(b_.CreateIntCast(lookup, b_.getPtrTy(), true),
+                          b_.GetNull(),
+                          "lookup_cond"),
+          lookup_success_block,
+          lookup_failure_block);
+
+      b_.SetInsertPoint(lookup_success_block);
+      llvm::Type *val_ty = b_.GetMapValueType(val_map.type);
+      Value *val_ptr = b_.CreatePointerCast(lookup,
+                                            val_ty->getPointerTo(),
+                                            "cast");
+
+      b_.CreateStore(b_.CreateLoad(b_.getInt64Ty(),
+                                   b_.CreateGEP(val_ty,
+                                                val_ptr,
+                                                { b_.getInt64(0),
+                                                  b_.getInt32(0) })),
+                     value);
+
+      if (value_type.GetTy() == Type::max_t ||
+          value_type.GetTy() == Type::min_t ||
+          value_type.GetTy() == Type::avg_t) {
+        // For max_t, min_t, and avg_t, we dont want to do anything if the
+        // values aren't set rather than recording zero.
+        Value *is_set = b_.CreateLoad(
+            b_.getInt64Ty(),
+            b_.CreateGEP(val_ty, val_ptr, { b_.getInt64(0), b_.getInt32(1) }));
+        b_.CreateCondBr(b_.CreateICmpNE(is_set, b_.getInt64(0), "is_set_cond"),
+                        update_bucket_block,
+                        merge_block);
+      } else {
+        b_.CreateBr(update_bucket_block);
+      }
+
+      b_.SetInsertPoint(lookup_failure_block);
+
+      if (value_type.GetTy() == Type::max_t ||
+          value_type.GetTy() == Type::min_t ||
+          value_type.GetTy() == Type::avg_t) {
+        // For max_t, min_t, and avg_t, a lookup failure is the same as being
+        // unset, so we jump to the end and don't record anything if the lookup
+        // fails rather than recording 0 to the current bucket.
+        b_.CreateBr(merge_block);
+      } else {
+        // For count_t and sum_t, it's OK to record 0 even if they have not
+        // yet been set.
+        b_.CreateStore(b_.getInt64(0), value);
+        b_.CreateBr(update_bucket_block);
+      }
+
+      b_.SetInsertPoint(update_bucket_block);
+    } else {
+      LOG(BUG) << "value type: expected integer or map";
+    }
+
+    Value *interval, *buckets;
+    interval = b_.getInt64(map_info->second.tseries_args->interval_ns);
+    buckets = b_.getInt64(map_info->second.tseries_args->buckets);
+
+    Value *now = b_.CreateGetNs(TimestampMode::boot, call.loc);
+    Value *epoch = b_.CreateUDiv(now, interval);
+    Value *bucket = b_.CreateURem(epoch, buckets);
+
+    auto scoped_key = getHistMapKey(map, bucket, call.loc);
+
+    llvm::Type *ts_struct_ty = b_.GetMapValueType(map.type);
+    CallInst *lookup = b_.CreateMapLookup(map, scoped_key.value());
+    SizedType &type = map.type;
+
+    BasicBlock *lookup_success_block = BasicBlock::Create(module_->getContext(),
+                                                          "lookup_success",
+                                                          parent);
+    BasicBlock *lookup_failure_block = BasicBlock::Create(module_->getContext(),
+                                                          "lookup_failure",
+                                                          parent);
+    Value *lookup_condition = b_.CreateICmpNE(
+        b_.CreateIntCast(lookup, b_.getPtrTy(), true),
+        b_.GetNull(),
+        "map_lookup_cond");
+    b_.CreateCondBr(lookup_condition,
+                    lookup_success_block,
+                    lookup_failure_block);
+
+    b_.SetInsertPoint(lookup_success_block);
+
+    auto *cast = b_.CreatePointerCast(lookup,
+                                      ts_struct_ty->getPointerTo(),
+                                      "cast");
+
+    b_.CreateStore(
+        b_.CreateLoad(b_.getInt64Ty(), value),
+        b_.CreateGEP(ts_struct_ty, cast, { b_.getInt64(0), b_.getInt32(0) }));
+    b_.CreateStore(
+        now,
+        b_.CreateGEP(ts_struct_ty, cast, { b_.getInt64(0), b_.getInt32(1) }));
+    b_.CreateStore(
+        epoch,
+        b_.CreateGEP(ts_struct_ty, cast, { b_.getInt64(0), b_.getInt32(2) }));
+
+    b_.CreateBr(merge_block);
+    b_.SetInsertPoint(lookup_failure_block);
+
+    AllocaInst *ts_struct = b_.CreateAllocaBPF(ts_struct_ty, "ts_struct");
+
+    b_.CreateStore(b_.CreateLoad(b_.getInt64Ty(), value),
+                   b_.CreateGEP(ts_struct_ty,
+                                ts_struct,
+                                { b_.getInt64(0), b_.getInt32(0) }));
+    b_.CreateStore(now,
+                   b_.CreateGEP(ts_struct_ty,
+                                ts_struct,
+                                { b_.getInt64(0), b_.getInt32(1) }));
+    b_.CreateStore(epoch,
+                   b_.CreateGEP(ts_struct_ty,
+                                ts_struct,
+                                { b_.getInt64(0), b_.getInt32(2) }));
+
+    b_.CreateMapUpdateElem(
+        ctx_, map.ident, scoped_key.value(), ts_struct, call.loc);
+
+    b_.CreateLifetimeEnd(ts_struct);
+
+    b_.CreateBr(merge_block);
+
+    b_.SetInsertPoint(merge_block);
+
+    b_.CreateLifetimeEnd(value);
+
+    return ScopedExpr();
   } else if (call.func == "delete") {
     auto &arg0 = *call.vargs.at(0);
     auto &map = static_cast<Map &>(arg0);
@@ -4872,18 +5035,18 @@ Pass CreateLLVMInitPass()
 Pass CreateCompilePass(
     std::optional<std::reference_wrapper<USDTHelper>> &&usdt_helper)
 {
-  return Pass::create(
-      "compile",
-      [usdt_helper](ASTContext &ast,
-                    BPFtrace &bpftrace,
-                    CompileContext &ctx) mutable {
-        USDTHelper default_usdt;
-        if (!usdt_helper) {
-          usdt_helper = std::ref(default_usdt);
-        }
-        CodegenLLVM llvm(ast, bpftrace, *ctx.context, usdt_helper->get());
-        return CompiledModule(llvm.compile());
-      });
+  return Pass::create("compile",
+                      [usdt_helper](ASTContext &ast,
+                                    BPFtrace &bpftrace,
+                                    CompileContext &ctx) mutable {
+                        USDTHelper default_usdt;
+                        if (!usdt_helper) {
+                          usdt_helper = std::ref(default_usdt);
+                        }
+                        CodegenLLVM llvm(
+                            ast, bpftrace, *ctx.context, usdt_helper->get());
+                        return CompiledModule(llvm.compile());
+                      });
 }
 
 Pass CreateVerifyPass()

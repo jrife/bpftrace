@@ -20,6 +20,7 @@ TEST(TextOutput, lhist_no_suffix)
     .lhist_args = LinearHistogramArgs{ .min = 610000,
                                        .max = 670000,
                                        .step = 10000 },
+    .tseries_args = {},
     .hist_bits_arg = {},
     .id = {}
   };
@@ -68,8 +69,14 @@ TEST(TextOutput, lhist_suffix)
     .lhist_args = LinearHistogramArgs{ .min = 0,
                                        .max = 5 * 1024,
                                        .step = 1024 },
+    .tseries_args =
+        TSeriesArgs{
+            .interval_ns = 0,
+            .buckets = 0,
+            .inner_type = CreateNone(),
+        },
     .hist_bits_arg = {},
-    .id = {}
+    .id = {},
   };
   BpfMap map{ libbpf::BPF_MAP_TYPE_HASH, "@mymap", 8, 8, 1000 };
 

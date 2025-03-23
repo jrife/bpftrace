@@ -286,6 +286,7 @@ static bool IsValidVarDeclType(const SizedType &ty)
     case Type::count_t:
     case Type::hist_t:
     case Type::lhist_t:
+    case Type::tseries_t:
     case Type::max_t:
     case Type::min_t:
     case Type::stats_t:
@@ -955,6 +956,63 @@ void SemanticAnalyser::visit(Call &call)
       }
     }
     call.type = CreateLhist();
+  } else if (call.func == "tseries") {
+    if (!bpftrace_.config_->get(ConfigKeyBool::enable_tseries)) {
+      call.addError() << "tseries is not enabled by default. To enable "
+                         "it, set the tseries config flag to 1.";
+    }
+    check_assignment(call, true, false, false);
+    if (is_final_pass() && check_nargs(call, 3)) {
+      auto &arg = call.vargs[0];
+      if (!check_arg(call, Type::integer, 0, false, false) &&
+          !check_arg(call, Type::count_t, 0, false, false) &&
+          !check_arg(call, Type::avg_t, 0, false, false) &&
+          !check_arg(call, Type::max_t, 0, false, false) &&
+          !check_arg(call, Type::min_t, 0, false, false) &&
+          !check_arg(call, Type::sum_t, 0, false, false)) {
+        call.addError() << call.func
+                        << "() only accepts these types: " << Type::integer
+                        << "," << Type::count_t << "," << Type::avg_t << ","
+                        << Type::max_t << "," << Type::min_t << ","
+                        << Type::sum_t << "; " << arg->type.GetTy()
+                        << " provided";
+      }
+      check_arg(call, Type::string, 1, true);
+      check_arg(call, Type::integer, 2, true);
+    }
+
+    if (is_final_pass()) {
+      Expression *interval_arg = call.vargs.at(1);
+      Expression *buckets_arg = call.vargs.at(2);
+      auto interval = bpftrace_.get_string_literal(interval_arg);
+      auto buckets = bpftrace_.get_int_literal(buckets_arg);
+
+      if (interval == "") {
+        call.addError() << call.func << ": invalid interval value";
+        return;
+      }
+      if (!buckets.has_value()) {
+        call.addError() << call.func << ": invalid buckets value";
+        return;
+      }
+
+      // ns, us, ms, s
+      std::string interval_re = "^[1-9][0-9]{0,2}[num]?s+$";
+      bool is_valid = std::regex_match(interval, std::regex(interval_re));
+      if (!is_valid) {
+        call.addError() << call.func << "() expects a valid interval size ("
+                        << interval_re << ") as input (\"" << interval
+                        << "\" provided)";
+        return;
+      }
+
+      if (buckets <= 0) {
+        call.addError() << "tseries() buckets must be >= 1";
+      } else if (buckets > 1000000) {
+        call.addError() << "tseries() too many buckets, must be <= 1000000";
+      }
+    }
+    call.type = CreateTSeries();
   } else if (call.func == "count") {
     check_assignment(call, true, false, false);
     (void)check_nargs(call, 0);
@@ -1899,7 +1957,8 @@ void SemanticAnalyser::validate_map_key(const SizedType &key, Node &node)
     node.addError() << "context cannot be used as a map key";
   }
 
-  if (key.IsHistTy() || key.IsLhistTy() || key.IsStatsTy()) {
+  if (key.IsHistTy() || key.IsLhistTy() || key.IsStatsTy() ||
+      key.IsTSeriesTy()) {
     node.addError() << key << " cannot be used as a map key";
   }
 
@@ -3081,6 +3140,7 @@ static const std::unordered_map<Type, std::string_view> AGGREGATE_HINTS{
   { Type::avg_t, "avg(retval)" },
   { Type::hist_t, "hist(retval)" },
   { Type::lhist_t, "lhist(rand %10, 0, 10, 1)" },
+  { Type::tseries_t, "tseries(rand %10, 0, 10, 1)" },
   { Type::stats_t, "stats(arg2)" },
 };
 
