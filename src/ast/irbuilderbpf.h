@@ -187,11 +187,11 @@ public:
                          Value *key,
                          Value *val,
                          const Location &loc);
-  void CreateMapElemAdd(Value *ctx,
-                        Map &map,
-                        Value *key,
-                        Value *val,
-                        const Location &loc);
+  Value *CreateMapElemAdd(Value *ctx,
+                          Map &map,
+                          Value *key,
+                          Value *val,
+                          const Location &loc);
   void CreateDebugOutput(std::string fmt_str,
                          const std::vector<Value *> &values,
                          const Location &loc);

@@ -28,6 +28,7 @@ enum class Type : uint8_t {
   record, // struct/union, as struct is a protected keyword
   hist_t,
   lhist_t,
+  tseries_t,
   count_t,
   sum_t,
   min_t,
@@ -154,9 +155,9 @@ private:
                                        // StructManager
   AddrSpace as_ = AddrSpace::none;
   bool is_signed_ = false;
-  bool ctx_ = false;                                   // Is bpf program context
-  std::unordered_set<std::string> btf_type_tags_;      // Only populated for
-                                                       // Type::pointer
+  bool ctx_ = false;                              // Is bpf program context
+  std::unordered_set<std::string> btf_type_tags_; // Only populated for
+                                                  // Type::pointer
   size_t num_elements_ = 0; // Only populated for array types
 
   friend class cereal::access;
@@ -355,6 +356,10 @@ public:
   {
     return type_ == Type::lhist_t;
   };
+  bool IsTSeriesTy() const
+  {
+    return type_ == Type::tseries_t;
+  };
   bool IsCountTy() const
   {
     return type_ == Type::count_t;
@@ -462,7 +467,7 @@ public:
   bool IsMultiOutputMapTy() const
   {
     return type_ == Type::hist_t || type_ == Type::lhist_t ||
-           type_ == Type::stats_t;
+           type_ == Type::stats_t || type_ == Type::tseries_t;
   }
 
   bool NeedsPercpuMap() const;
@@ -520,6 +525,7 @@ SizedType CreateStats(bool is_signed);
 SizedType CreateUsername();
 SizedType CreateInet(size_t size);
 SizedType CreateLhist();
+SizedType CreateTSeries();
 SizedType CreateHist();
 SizedType CreateUSym();
 SizedType CreateKSym();

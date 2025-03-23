@@ -18,8 +18,12 @@ declare i64 @llvm.bpf.pseudo(i64 %0, i64 %1) #0
 
 define i64 @kprobe_f_1(ptr %0) section "s_kprobe_f_1" !dbg !61 {
 entry:
+  %"@x_val" = alloca i64, align 8
+  %"@x_key1" = alloca i64, align 8
   %avg_struct = alloca %avg_stas_val, align 8
   %"@x_key" = alloca i64, align 8
+  %total = alloca i64, align 8
+  call void @llvm.lifetime.start.p0(i64 -1, ptr %total)
   call void @llvm.lifetime.start.p0(i64 -1, ptr %"@x_key")
   store i64 0, ptr %"@x_key", align 8
   %lookup_elem = call ptr inttoptr (i64 1 to ptr)(ptr @AT_x, ptr %"@x_key")
@@ -35,12 +39,13 @@ lookup_success:                                   ; preds = %entry
   %4 = load i64, ptr %3, align 8
   %5 = getelementptr %avg_stas_val, ptr %lookup_elem, i64 0, i32 1
   %6 = load i64, ptr %5, align 8
-  %7 = getelementptr %avg_stas_val, ptr %lookup_elem, i64 0, i32 0
-  %8 = add i64 %4, %2
-  store i64 %8, ptr %7, align 8
+  %7 = add i64 %4, %2
+  %8 = getelementptr %avg_stas_val, ptr %lookup_elem, i64 0, i32 0
+  store i64 %7, ptr %8, align 8
   %9 = getelementptr %avg_stas_val, ptr %lookup_elem, i64 0, i32 1
   %10 = add i64 1, %6
   store i64 %10, ptr %9, align 8
+  store i64 %7, ptr %total, align 8
   br label %lookup_merge
 
 lookup_failure:                                   ; preds = %entry
@@ -51,10 +56,19 @@ lookup_failure:                                   ; preds = %entry
   store i64 1, ptr %12, align 8
   %update_elem = call i64 inttoptr (i64 2 to ptr)(ptr @AT_x, ptr %"@x_key", ptr %avg_struct, i64 0)
   call void @llvm.lifetime.end.p0(i64 -1, ptr %avg_struct)
+  store i64 %2, ptr %total, align 8
   br label %lookup_merge
 
 lookup_merge:                                     ; preds = %lookup_failure, %lookup_success
+  %13 = load i64, ptr %total, align 8
   call void @llvm.lifetime.end.p0(i64 -1, ptr %"@x_key")
+  call void @llvm.lifetime.start.p0(i64 -1, ptr %"@x_key1")
+  store i64 0, ptr %"@x_key1", align 8
+  call void @llvm.lifetime.start.p0(i64 -1, ptr %"@x_val")
+  store i64 %13, ptr %"@x_val", align 8
+  %update_elem2 = call i64 inttoptr (i64 2 to ptr)(ptr @AT_x, ptr %"@x_key1", ptr %"@x_val", i64 0)
+  call void @llvm.lifetime.end.p0(i64 -1, ptr %"@x_val")
+  call void @llvm.lifetime.end.p0(i64 -1, ptr %"@x_key1")
   ret i64 0
 }
 

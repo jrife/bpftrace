@@ -95,7 +95,7 @@ libbpf::bpf_map_type get_bpf_map_type(const SizedType &val_type,
 {
   if (val_type.IsCountTy() && key_type.IsNoneTy()) {
     return libbpf::BPF_MAP_TYPE_PERCPU_ARRAY;
-  } else if (val_type.NeedsPercpuMap()) {
+  } else if (val_type.NeedsPercpuMap() || key_type.IsTSeriesTy()) {
     return libbpf::BPF_MAP_TYPE_PERCPU_HASH;
   } else {
     return libbpf::BPF_MAP_TYPE_HASH;

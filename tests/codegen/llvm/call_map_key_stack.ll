@@ -20,11 +20,13 @@ declare i64 @llvm.bpf.pseudo(i64 %0, i64 %1) #0
 
 define i64 @kprobe_f_1(ptr %0) section "s_kprobe_f_1" !dbg !64 {
 entry:
+  %"@x_key13" = alloca i64, align 8
   %"@x_key11" = alloca i64, align 8
-  %"@x_key9" = alloca i64, align 8
-  %initial_value7 = alloca i64, align 8
-  %lookup_elem_val5 = alloca i64, align 8
+  %initial_value9 = alloca i64, align 8
+  %lookup_elem_val7 = alloca i64, align 8
   %"@y_key" = alloca i64, align 8
+  %"@x_val" = alloca i64, align 8
+  %"@x_key1" = alloca i64, align 8
   %initial_value = alloca i64, align 8
   %lookup_elem_val = alloca i64, align 8
   %"@x_key" = alloca i64, align 8
@@ -39,6 +41,8 @@ lookup_success:                                   ; preds = %entry
   %1 = load i64, ptr %lookup_elem, align 8
   %2 = add i64 %1, 1
   store i64 %2, ptr %lookup_elem, align 8
+  %3 = load i64, ptr %lookup_elem, align 8
+  store i64 %3, ptr %lookup_elem_val, align 8
   br label %lookup_merge
 
 lookup_failure:                                   ; preds = %entry
@@ -46,44 +50,57 @@ lookup_failure:                                   ; preds = %entry
   store i64 1, ptr %initial_value, align 8
   %update_elem = call i64 inttoptr (i64 2 to ptr)(ptr @AT_x, ptr %"@x_key", ptr %initial_value, i64 1)
   call void @llvm.lifetime.end.p0(i64 -1, ptr %initial_value)
+  store i64 1, ptr %lookup_elem_val, align 8
   br label %lookup_merge
 
 lookup_merge:                                     ; preds = %lookup_failure, %lookup_success
+  %4 = load i64, ptr %lookup_elem_val, align 8
   call void @llvm.lifetime.end.p0(i64 -1, ptr %lookup_elem_val)
   call void @llvm.lifetime.end.p0(i64 -1, ptr %"@x_key")
+  call void @llvm.lifetime.start.p0(i64 -1, ptr %"@x_key1")
+  store i64 1, ptr %"@x_key1", align 8
+  call void @llvm.lifetime.start.p0(i64 -1, ptr %"@x_val")
+  store i64 %4, ptr %"@x_val", align 8
+  %update_elem2 = call i64 inttoptr (i64 2 to ptr)(ptr @AT_x, ptr %"@x_key1", ptr %"@x_val", i64 0)
+  call void @llvm.lifetime.end.p0(i64 -1, ptr %"@x_val")
+  call void @llvm.lifetime.end.p0(i64 -1, ptr %"@x_key1")
   %log2 = call i64 @log2(i64 10, i64 0)
   call void @llvm.lifetime.start.p0(i64 -1, ptr %"@y_key")
   store i64 %log2, ptr %"@y_key", align 8
-  %lookup_elem1 = call ptr inttoptr (i64 1 to ptr)(ptr @AT_y, ptr %"@y_key")
-  call void @llvm.lifetime.start.p0(i64 -1, ptr %lookup_elem_val5)
-  %map_lookup_cond6 = icmp ne ptr %lookup_elem1, null
-  br i1 %map_lookup_cond6, label %lookup_success2, label %lookup_failure3
+  %lookup_elem3 = call ptr inttoptr (i64 1 to ptr)(ptr @AT_y, ptr %"@y_key")
+  call void @llvm.lifetime.start.p0(i64 -1, ptr %lookup_elem_val7)
+  %map_lookup_cond8 = icmp ne ptr %lookup_elem3, null
+  br i1 %map_lookup_cond8, label %lookup_success4, label %lookup_failure5
 
-lookup_success2:                                  ; preds = %lookup_merge
-  %3 = load i64, ptr %lookup_elem1, align 8
-  %4 = add i64 %3, 1
-  store i64 %4, ptr %lookup_elem1, align 8
-  br label %lookup_merge4
+lookup_success4:                                  ; preds = %lookup_merge
+  %5 = load i64, ptr %lookup_elem3, align 8
+  %6 = add i64 %5, 1
+  store i64 %6, ptr %lookup_elem3, align 8
+  %7 = load i64, ptr %lookup_elem3, align 8
+  store i64 %7, ptr %lookup_elem_val7, align 8
+  br label %lookup_merge6
 
-lookup_failure3:                                  ; preds = %lookup_merge
-  call void @llvm.lifetime.start.p0(i64 -1, ptr %initial_value7)
-  store i64 1, ptr %initial_value7, align 8
-  %update_elem8 = call i64 inttoptr (i64 2 to ptr)(ptr @AT_y, ptr %"@y_key", ptr %initial_value7, i64 1)
-  call void @llvm.lifetime.end.p0(i64 -1, ptr %initial_value7)
-  br label %lookup_merge4
+lookup_failure5:                                  ; preds = %lookup_merge
+  call void @llvm.lifetime.start.p0(i64 -1, ptr %initial_value9)
+  store i64 1, ptr %initial_value9, align 8
+  %update_elem10 = call i64 inttoptr (i64 2 to ptr)(ptr @AT_y, ptr %"@y_key", ptr %initial_value9, i64 1)
+  call void @llvm.lifetime.end.p0(i64 -1, ptr %initial_value9)
+  store i64 1, ptr %lookup_elem_val7, align 8
+  br label %lookup_merge6
 
-lookup_merge4:                                    ; preds = %lookup_failure3, %lookup_success2
-  call void @llvm.lifetime.end.p0(i64 -1, ptr %lookup_elem_val5)
+lookup_merge6:                                    ; preds = %lookup_failure5, %lookup_success4
+  %8 = load i64, ptr %lookup_elem_val7, align 8
+  call void @llvm.lifetime.end.p0(i64 -1, ptr %lookup_elem_val7)
   call void @llvm.lifetime.end.p0(i64 -1, ptr %"@y_key")
-  call void @llvm.lifetime.start.p0(i64 -1, ptr %"@x_key9")
-  store i64 1, ptr %"@x_key9", align 8
-  %lookup_elem10 = call ptr inttoptr (i64 1 to ptr)(ptr @AT_x, ptr %"@x_key9")
-  %has_key = icmp ne ptr %lookup_elem10, null
-  call void @llvm.lifetime.end.p0(i64 -1, ptr %"@x_key9")
   call void @llvm.lifetime.start.p0(i64 -1, ptr %"@x_key11")
   store i64 1, ptr %"@x_key11", align 8
-  %delete_elem = call i64 inttoptr (i64 3 to ptr)(ptr @AT_x, ptr %"@x_key11")
+  %lookup_elem12 = call ptr inttoptr (i64 1 to ptr)(ptr @AT_x, ptr %"@x_key11")
+  %has_key = icmp ne ptr %lookup_elem12, null
   call void @llvm.lifetime.end.p0(i64 -1, ptr %"@x_key11")
+  call void @llvm.lifetime.start.p0(i64 -1, ptr %"@x_key13")
+  store i64 1, ptr %"@x_key13", align 8
+  %delete_elem = call i64 inttoptr (i64 3 to ptr)(ptr @AT_x, ptr %"@x_key13")
+  call void @llvm.lifetime.end.p0(i64 -1, ptr %"@x_key13")
   ret i64 0
 }
 

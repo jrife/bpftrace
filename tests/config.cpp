@@ -57,6 +57,10 @@ TEST(Config, get_and_set)
   EXPECT_TRUE(config_setter.set(ConfigMissingProbes::ignore));
   EXPECT_EQ(config.get(ConfigKeyMissingProbes::default_),
             ConfigMissingProbes::ignore);
+
+  EXPECT_FALSE(config.get(ConfigKeyBool::enable_tseries));
+  EXPECT_TRUE(config_setter.set(ConfigKeyBool::enable_tseries, true));
+  EXPECT_TRUE(config.get(ConfigKeyBool::enable_tseries));
 }
 
 TEST(Config, get_config_key)
@@ -134,5 +138,7 @@ TEST(ConfigSetter, same_source_cannot_set_twice)
   EXPECT_TRUE(config_setter.set(ConfigKeyInt::max_map_keys, 10));
   EXPECT_FALSE(config_setter.set(ConfigKeyInt::max_map_keys, 11));
 }
+
+// TODO: config test?
 
 } // namespace bpftrace::test

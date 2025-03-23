@@ -6,6 +6,7 @@
 
 #include "ast/attachpoint_parser.h"
 #include "ast/passes/codegen_llvm.h"
+#include "ast/passes/config_analyser.h"
 #include "ast/passes/field_analyser.h"
 #include "ast/passes/parser.h"
 #include "ast/passes/pid_filter_pass.h"
@@ -63,6 +64,7 @@ static void test(BPFtrace &bpftrace,
                 .add(CreateClangPass())
                 .add(CreateParsePass())
                 .add(ast::CreateParseAttachpointsPass())
+                .add(ast::CreateConfigPass())
                 .add(ast::CreateSemanticPass())
                 .add(ast::CreatePidFilterPass())
                 .add(ast::CreateRecursionCheckPass())

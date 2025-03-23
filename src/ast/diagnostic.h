@@ -21,7 +21,7 @@ public:
     Warning,
     Error,
   };
-  Diagnostic(const Location loc) : loc_(loc) {};
+  Diagnostic(const Location loc) : loc_(loc){};
   std::string msg() const
   {
     return msg_.str();

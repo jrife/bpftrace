@@ -1,5 +1,6 @@
 #include "ast/passes/semantic_analyser.h"
 #include "ast/attachpoint_parser.h"
+#include "ast/passes/config_analyser.h"
 #include "ast/passes/field_analyser.h"
 #include "ast/passes/printer.h"
 #include "bpftrace.h"
@@ -36,6 +37,7 @@ ast::ASTContext test_for_warning(BPFtrace &bpftrace,
                 .add(CreateClangPass())
                 .add(CreateParsePass())
                 .add(ast::CreateParseAttachpointsPass())
+                .add(ast::CreateConfigPass())
                 .add(ast::CreateSemanticPass())
                 .run();
   EXPECT_TRUE(bool(ok));
@@ -91,6 +93,7 @@ ast::ASTContext test(BPFtrace &bpftrace,
                 .add(CreateClangPass())
                 .add(CreateParsePass())
                 .add(ast::CreateParseAttachpointsPass())
+                .add(ast::CreateConfigPass())
                 .add(ast::CreateSemanticPass())
                 .run();
 
@@ -324,6 +327,8 @@ TEST(semantic_analyser, builtin_functions)
   test("kprobe:f { cgroupid(\"/sys/fs/cgroup/unified/mycg\"); }");
   test("kprobe:f { macaddr(0xffff) }");
   test("kprobe:f { nsecs() }");
+  test("config = { enable_tseries = 1 } kprobe:f { @x = tseries(3, \"1s\", 1) "
+       "}");
 }
 
 TEST(semantic_analyser, undefined_map)
@@ -820,6 +825,250 @@ TEST(semantic_analyser, call_lhist_posparam)
   bpftrace.add_param("hello");
   test(bpftrace, "kprobe:f { @ = lhist(5, $1, $2, $3); }");
   test(bpftrace, "kprobe:f { @ = lhist(5, $1, $2, $4); }", 3);
+}
+
+TEST(semantic_analyser, call_tseries)
+{
+  test("config = { enable_tseries = 1 } kprobe:f { @ = tseries(5, \"10s\", 1); "
+       "}");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { @ = tseries(5, \"10s\"); }",
+      R"(
+stdin:1:48-65: ERROR: tseries() requires 3 arguments (2 provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(5, "10s"); }
+                                               ~~~~~~~~~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @ = tseries(5); }",
+             R"(
+stdin:1:48-58: ERROR: tseries() requires 3 arguments (1 provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(5); }
+                                               ~~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @ = tseries(); }", R"(
+stdin:1:48-57: ERROR: tseries() requires 3 arguments (0 provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(); }
+                                               ~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @ = tseries(5, "
+             "\"10s\", 1, 10); }",
+             R"(
+stdin:1:48-72: ERROR: tseries() requires 3 arguments (4 provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(5, "10s", 1, 10); }
+                                               ~~~~~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { tseries(5, \"10s\", 1); }",
+      R"(
+stdin:1:44-64: ERROR: tseries() should be directly assigned to a map
+config = { enable_tseries = 1 } kprobe:f { tseries(5, "10s", 1); }
+                                           ~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { $x = tseries(); }", R"(
+stdin:1:49-58: ERROR: tseries() should be directly assigned to a map
+config = { enable_tseries = 1 } kprobe:f { $x = tseries(); }
+                                                ~~~~~~~~~
+stdin:1:49-58: ERROR: tseries() requires 3 arguments (0 provided)
+config = { enable_tseries = 1 } kprobe:f { $x = tseries(); }
+                                                ~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @[tseries()] = 1; }",
+             R"(
+stdin:1:44-55: ERROR: tseries() should be directly assigned to a map
+config = { enable_tseries = 1 } kprobe:f { @[tseries()] = 1; }
+                                           ~~~~~~~~~~~
+stdin:1:44-55: ERROR: tseries() requires 3 arguments (0 provided)
+config = { enable_tseries = 1 } kprobe:f { @[tseries()] = 1; }
+                                           ~~~~~~~~~~~
+stdin:1:44-55: ERROR: tseries_t cannot be used as a map key
+config = { enable_tseries = 1 } kprobe:f { @[tseries()] = 1; }
+                                           ~~~~~~~~~~~
+)");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { if(tseries()) { 123 } }",
+      R"(
+stdin:1:44-56: ERROR: tseries() should be directly assigned to a map
+config = { enable_tseries = 1 } kprobe:f { if(tseries()) { 123 } }
+                                           ~~~~~~~~~~~~
+stdin:1:44-56: ERROR: tseries() requires 3 arguments (0 provided)
+config = { enable_tseries = 1 } kprobe:f { if(tseries()) { 123 } }
+                                           ~~~~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { tseries() ? 0 : 1; }",
+             R"(
+stdin:1:44-53: ERROR: tseries() should be directly assigned to a map
+config = { enable_tseries = 1 } kprobe:f { tseries() ? 0 : 1; }
+                                           ~~~~~~~~~
+stdin:1:44-53: ERROR: tseries() requires 3 arguments (0 provided)
+config = { enable_tseries = 1 } kprobe:f { tseries() ? 0 : 1; }
+                                           ~~~~~~~~~
+)");
+  test("config = { enable_tseries = 1 } kprobe:f { @ = tseries(-1, \"10s\", "
+       "5); }");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "
+             "\"10s\", -1); }",
+             R"(
+stdin:1:48-69: ERROR: tseries() buckets must be >= 1
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "10s", -1); }
+                                               ~~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "
+             "\"10s\", 1000001); }",
+             R"(
+stdin:1:48-74: ERROR: tseries() too many buckets, must be <= 1000000
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "10s", 1000001); }
+                                               ~~~~~~~~~~~~~~~~~~~~~~~~~~
+)");
+  test("config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"10ns\", "
+       "5); }");
+  test("config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"10us\", "
+       "5); }");
+  test("config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"10ms\", "
+       "5); }");
+  test("config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"10s\", "
+       "5); }");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"10\", "
+      "5); }",
+      R"(
+stdin:1:48-67: ERROR: tseries() expects a valid interval size (^[1-9][0-9]{0,2}[num]?s+$) as input ("10" provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "10", 5); }
+                                               ~~~~~~~~~~~~~~~~~~~
+)");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"10m\", "
+      "5); }",
+      R"(
+stdin:1:48-68: ERROR: tseries() expects a valid interval size (^[1-9][0-9]{0,2}[num]?s+$) as input ("10m" provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "10m", 5); }
+                                               ~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"10h\", "
+      "5); }",
+      R"(
+stdin:1:48-68: ERROR: tseries() expects a valid interval size (^[1-9][0-9]{0,2}[num]?s+$) as input ("10h" provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "10h", 5); }
+                                               ~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"10d\", "
+      "5); }",
+      R"(
+stdin:1:48-68: ERROR: tseries() expects a valid interval size (^[1-9][0-9]{0,2}[num]?s+$) as input ("10d" provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "10d", 5); }
+                                               ~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"10s5ns\", "
+      "5); }",
+      R"(
+stdin:1:48-71: ERROR: tseries() expects a valid interval size (^[1-9][0-9]{0,2}[num]?s+$) as input ("10s5ns" provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "10s5ns", 5); }
+                                               ~~~~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"ns\", "
+      "5); }",
+      R"(
+stdin:1:48-67: ERROR: tseries() expects a valid interval size (^[1-9][0-9]{0,2}[num]?s+$) as input ("ns" provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "ns", 5); }
+                                               ~~~~~~~~~~~~~~~~~~~
+)");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"us\", "
+      "5); }",
+      R"(
+stdin:1:48-67: ERROR: tseries() expects a valid interval size (^[1-9][0-9]{0,2}[num]?s+$) as input ("us" provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "us", 5); }
+                                               ~~~~~~~~~~~~~~~~~~~
+)");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"ms\", "
+      "5); }",
+      R"(
+stdin:1:48-67: ERROR: tseries() expects a valid interval size (^[1-9][0-9]{0,2}[num]?s+$) as input ("ms" provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "ms", 5); }
+                                               ~~~~~~~~~~~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, \"s\", "
+             "5); }",
+             R"(
+stdin:1:48-66: ERROR: tseries() expects a valid interval size (^[1-9][0-9]{0,2}[num]?s+$) as input ("s" provided)
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(1, "s", 5); }
+                                               ~~~~~~~~~~~~~~~~~~
+)");
+  test("config = { enable_tseries = 1 } kprobe:f { @ = tseries(count(), "
+       "\"10s\", 5); }");
+  test("config = { enable_tseries = 1 } kprobe:f { @ = tseries(sum(1), "
+       "\"10s\", 5); }");
+  test("config = { enable_tseries = 1 } kprobe:f { @ = tseries(min(1), "
+       "\"10s\", 5); }");
+  test("config = { enable_tseries = 1 } kprobe:f { @ = tseries(max(1), "
+       "\"10s\", 5); }");
+  test("config = { enable_tseries = 1 } kprobe:f { @ = tseries(avg(1), "
+       "\"10s\", 5); }");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @ = tseries(stats(1), "
+             "\"10s\", 5); }",
+             R"(
+stdin:1:48-75: ERROR: tseries() only accepts these types: int,count_t,avg_t,max_t,min_t,sum_t; stats_t provided
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(stats(1), "10s", 5); }
+                                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error(
+      "config = { enable_tseries = 1 } kprobe:f { @ = tseries(lhist(5, 0, "
+      "10, 1), \"10s\", 5); }",
+      R"(
+stdin:1:48-85: ERROR: tseries() only accepts these types: int,count_t,avg_t,max_t,min_t,sum_t; lhist_t provided
+config = { enable_tseries = 1 } kprobe:f { @ = tseries(lhist(5, 0, 10, 1), "10s", 5); }
+                                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @v = count(); @ = "
+             "tseries(@v, \"10s\", 5); }",
+             R"(
+stdin:1:62-83: ERROR: tseries() only accepts these types: count_t,avg_t,max_t,min_t,sum_t as embedded calls; a map name was provided
+config = { enable_tseries = 1 } kprobe:f { @v = count(); @ = tseries(@v, "10s", 5); }
+                                                             ~~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @v = sum(5); @ = "
+             "tseries(@v, \"10s\", 5); }",
+             R"(
+stdin:1:61-82: ERROR: tseries() only accepts these types: count_t,avg_t,max_t,min_t,sum_t as embedded calls; a map name was provided
+config = { enable_tseries = 1 } kprobe:f { @v = sum(5); @ = tseries(@v, "10s", 5); }
+                                                            ~~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @v = min(5); @ = "
+             "tseries(@v, \"10s\", 5); }",
+             R"(
+stdin:1:61-82: ERROR: tseries() only accepts these types: count_t,avg_t,max_t,min_t,sum_t as embedded calls; a map name was provided
+config = { enable_tseries = 1 } kprobe:f { @v = min(5); @ = tseries(@v, "10s", 5); }
+                                                            ~~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @v = max(5); @ = "
+             "tseries(@v, \"10s\", 5); }",
+             R"(
+stdin:1:61-82: ERROR: tseries() only accepts these types: count_t,avg_t,max_t,min_t,sum_t as embedded calls; a map name was provided
+config = { enable_tseries = 1 } kprobe:f { @v = max(5); @ = tseries(@v, "10s", 5); }
+                                                            ~~~~~~~~~~~~~~~~~~~~~
+)");
+  test_error("config = { enable_tseries = 1 } kprobe:f { @v = avg(5); @ = "
+             "tseries(@v, \"10s\", 5); }",
+             R"(
+stdin:1:61-82: ERROR: tseries() only accepts these types: count_t,avg_t,max_t,min_t,sum_t as embedded calls; a map name was provided
+config = { enable_tseries = 1 } kprobe:f { @v = avg(5); @ = tseries(@v, "10s", 5); }
+                                                            ~~~~~~~~~~~~~~~~~~~~~
+)");
+}
+
+TEST(semantic_analyser, call_tseries_posparam)
+{
+  BPFtrace bpftrace;
+  bpftrace.add_param("10s");
+  bpftrace.add_param("5");
+  bpftrace.add_param("20");
+  test(
+      bpftrace,
+      "config = { enable_tseries = 1 } kprobe:f { @ = tseries(5, str($1), $2); "
+      "}");
 }
 
 TEST(semantic_analyser, call_count)
@@ -2687,6 +2936,14 @@ BEGIN { @x = lhist(10, 0, 10, 1); @y[@x] = 1; }
                                   ~~~~~
 )");
 
+  test_error("config = { enable_tseries = 1 } BEGIN { @x = tseries(10, \"1s\", "
+             "10); @y[@x] = 1; }",
+             R"(
+stdin:1:69-74: ERROR: tseries_t cannot be used as a map key
+config = { enable_tseries = 1 } BEGIN { @x = tseries(10, "1s", 10); @y[@x] = 1; }
+                                                                    ~~~~~
+)");
+
   test_error("BEGIN { @x = stats(10); @y[@x] = 1; }", R"(
 stdin:1:25-30: ERROR: stats_t cannot be used as a map key
 BEGIN { @x = stats(10); @y[@x] = 1; }
@@ -4226,6 +4483,13 @@ stdin:1:51-56: ERROR: Loop expression does not support type: lhist_t
 BEGIN { @map[0] = lhist(10, 0, 10, 1); for ($kv : @map) { } }
                                                   ~~~~~
 )");
+  test_error("config = { enable_tseries = 1 } BEGIN { @map[0] = tseries(10, "
+             "\"10s\", 10); for ($kv : @map) { } }",
+             R"(
+stdin:1:86-91: ERROR: Loop expression does not support type: tseries_t
+config = { enable_tseries = 1 } BEGIN { @map[0] = tseries(10, "10s", 10); for ($kv : @map) { } }
+                                                                                     ~~~~~
+)");
   test_error("BEGIN { @map[0] = stats(10); for ($kv : @map) { } }", R"(
 stdin:1:41-46: ERROR: Loop expression does not support type: stats_t
 BEGIN { @map[0] = stats(10); for ($kv : @map) { } }
@@ -4783,6 +5047,14 @@ BEGIN { @a = lhist(123, 0, 123, 1); let $b = @a; }
                                     ~~~~~~~~~~~
 )");
 
+  test_error("config = { enable_tseries = 1 } BEGIN { @a = tseries(10, "
+             "\"10s\", 1); let $b = @a; }",
+             R"(
+stdin:1:69-80: ERROR: Map value 'tseries_t' cannot be assigned to a scratch variable.
+config = { enable_tseries = 1 } BEGIN { @a = tseries(10, "10s", 1); let $b = @a; }
+                                                                    ~~~~~~~~~~~
+)");
+
   test_error("BEGIN { @a = stats(10); let $b = @a; }", R"(
 stdin:1:25-36: ERROR: Map value 'stats_t' cannot be assigned to a scratch variable.
 BEGIN { @a = stats(10); let $b = @a; }
@@ -4799,6 +5071,14 @@ BEGIN { @a = hist(10); @b = @a; }
 stdin:1:37-44: ERROR: Map value 'lhist_t' cannot be assigned from one map to another. The function that returns this type must be called directly e.g. `@b = lhist(rand %10, 0, 10, 1);`.
 BEGIN { @a = lhist(123, 0, 123, 1); @b = @a; }
                                     ~~~~~~~
+)");
+
+  test_error("config = { enable_tseries = 1 } BEGIN { @a = tseries(10, "
+             "\"10s\", 1); @b = @a; }",
+             R"(
+stdin:1:69-76: ERROR: Map value 'tseries_t' cannot be assigned from one map to another. The function that returns this type must be called directly e.g. `@b = tseries(rand %10, 0, 10, 1);`.
+config = { enable_tseries = 1 } BEGIN { @a = tseries(10, "10s", 1); @b = @a; }
+                                                                    ~~~~~~~
 )");
 
   test_error("BEGIN { @a = stats(10); @b = @a; }", R"(

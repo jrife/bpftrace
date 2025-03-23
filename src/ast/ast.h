@@ -64,7 +64,7 @@ enum class ExpansionType {
 
 class Node {
 public:
-  Node(Diagnostics &d, Location &&loc) : diagnostics_(d), loc(loc) {};
+  Node(Diagnostics &d, Location &&loc) : diagnostics_(d), loc(loc){};
   virtual ~Node() = default;
 
   Node(const Node &) = delete;
@@ -105,7 +105,7 @@ class Map;
 class Variable;
 class Expression : public Node {
 public:
-  Expression(Diagnostics &d, Location &&loc) : Node(d, std::move(loc)) {};
+  Expression(Diagnostics &d, Location &&loc) : Node(d, std::move(loc)){};
   ~Expression() override = default;
 
   SizedType type;
@@ -230,6 +230,7 @@ class Map : public Expression {
 public:
   explicit Map(Diagnostics &d, std::string ident, Location &&loc);
   Map(Diagnostics &d, std::string ident, Expression &expr, Location &&loc);
+  Map(Diagnostics &d, Location &&loc);
 
   std::string ident;
   Expression *key_expr = nullptr;
@@ -239,6 +240,9 @@ public:
   // which involve calling map_lookup_percpu_elem
   // https://github.com/bpftrace/bpftrace/issues/3755
   bool is_read = true;
+
+private:
+  static inline int next_anon_map_id = 0;
 };
 
 class Variable : public Expression {
@@ -316,7 +320,7 @@ public:
 
 class Statement : public Node {
 public:
-  Statement(Diagnostics &d, Location &&loc) : Node(d, std::move(loc)) {};
+  Statement(Diagnostics &d, Location &&loc) : Node(d, std::move(loc)){};
 };
 
 using StatementList = std::vector<Statement *>;

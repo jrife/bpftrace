@@ -108,6 +108,12 @@ Map::Map(Diagnostics &d, std::string ident, Location &&loc)
   is_map = true;
 }
 
+Map::Map(Diagnostics &d, Location &&loc) : Expression(d, std::move(loc))
+{
+  is_map = true;
+  ident = std::move("anonymous_map_" + std::to_string(next_anon_map_id++));
+}
+
 Map::Map(Diagnostics &d, std::string ident, Expression &expr, Location &&loc)
     : Expression(d, std::move(loc)), ident(std::move(ident)), key_expr(&expr)
 {

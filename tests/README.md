@@ -89,6 +89,42 @@ Each runtime testcase consists of multiple directives. In no particular order:
    text after stripping initial and final empty lines
 * `EXPECT_JSON`: A json file containing the expected output, matched after
    converting the output and the file to a dict (thus ignoring field order).
+* `TIMESTAMPS`: Expect there to be a timestamp string wherever "$timestamp"
+  appears in the expected output. TIMESTAMPS must contain a time format
+  string followed by a duration. The time format string may contain the
+  following format codes:
+
+  %Y - Year with century as a decimal number.
+  %m - Month as a zero-padded decimal number.
+  %d - Day of the month as a zero-padded decimal number.
+  %H - Hour (24-hour clock) as a zero-padded decimal number.
+  %M - Minute as a zero-padded decimal number.
+  %S - Second as a zero-padded decimal number.
+  %l - Millisecond as a decimal number, zero-padded to 3 digits.
+  %f - Microsecond as a decimal number, zero-padded to 6 digits.
+  %k - Nanosecond as a decimal number, zero-padded to 9 digits.
+
+  Only one of %l, %f, or %k may be used in the same format string.
+
+  The duration string can be in units of seconds (s), milliseconds (ms), or
+  microseconds (us), but not a combination of the three.
+
+  ```
+  ...
+  EXPECT $timestamp one $timestamp two
+  TIMESTAMPS %H:%M:%S 1s
+  ...
+
+  ...
+  EXPECT $timestamp one $timestamp two
+  TIMESTAMPS %H:%M:%S.$l 10ms
+  ...
+
+  ...
+  EXPECT $timestamp one $timestamp two
+  TIMESTAMPS %Y-%m-%dT%H:%M:%S.%kZ 10us
+  ...
+  ```
 * `TIMEOUT`: The timeout for the testcase (in seconds). This field is required.
 * `BEFORE`: Run the command in a shell before running bpftrace. The command
   will run while bpftrace is running and be terminated after the test case

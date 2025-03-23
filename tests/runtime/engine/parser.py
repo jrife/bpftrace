@@ -48,6 +48,8 @@ TestStruct = namedtuple(
         'new_pidns',
         'skip_if_env_has',
         'return_code',
+        'timestamp_interval',
+        'timestamp_format',
     ],
 )
 
@@ -130,6 +132,8 @@ class TestParser(object):
         skip_if_env_has = None
         return_code = None
         prev_item_name = ''
+        timestamp_interval = ''
+        timestamp_format = ''
 
         for item in test:
             if item[:len(prev_item_name) + 1].isspace():
@@ -214,6 +218,12 @@ class TestParser(object):
                 skip_if_env_has = (parts[0], parts[1])
             elif item_name == "RETURN_CODE":
                 return_code = int(line.strip(' '))
+            elif item_name == "TIMESTAMPS":
+                parts = line.split()
+                if len(parts) != 2:
+                    raise ValueError('TIMESTAMP must specify a format string and a duration string')
+                timestamp_format = parts[0]
+                timestamp_interval = parts[1]
             else:
                 raise UnknownFieldError('Field %s is unknown. Suite: %s' % (item_name, test_suite))
 
@@ -256,4 +266,6 @@ class TestParser(object):
             new_pidns,
             skip_if_env_has,
             return_code,
+            timestamp_interval,
+            timestamp_format,
         )

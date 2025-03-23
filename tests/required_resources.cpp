@@ -85,6 +85,12 @@ TEST(required_resources, round_trip_map_info)
               .max = 123,
               .step = 33,
           },
+      .tseries_args =
+          TSeriesArgs{
+              .interval_ns = 0,
+              .buckets = 0,
+              .inner_type = CreateNone(),
+          },
       .hist_bits_arg = 1,
     };
     info.key_type = CreateInt32();

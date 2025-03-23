@@ -24,8 +24,8 @@ declare i64 @llvm.bpf.pseudo(i64 %0, i64 %1) #0
 
 define i64 @kprobe_f_1(ptr %0) section "s_kprobe_f_1" !dbg !83 {
 entry:
-  %initial_value9 = alloca i64, align 8
-  %lookup_elem_val7 = alloca i64, align 8
+  %initial_value14 = alloca i64, align 8
+  %lookup_elem_val12 = alloca i64, align 8
   %initial_value = alloca i64, align 8
   %lookup_elem_val = alloca i64, align 8
   %get_cpu_id = call i64 inttoptr (i64 8 to ptr)()
@@ -42,6 +42,8 @@ lookup_success:                                   ; preds = %entry
   %3 = load i64, ptr %lookup_elem, align 8
   %4 = add i64 %3, 1
   store i64 %4, ptr %lookup_elem, align 8
+  %5 = load i64, ptr %lookup_elem, align 8
+  store i64 %5, ptr %lookup_elem_val, align 8
   br label %lookup_merge
 
 lookup_failure:                                   ; preds = %entry
@@ -49,49 +51,66 @@ lookup_failure:                                   ; preds = %entry
   store i64 1, ptr %initial_value, align 8
   %update_elem = call i64 inttoptr (i64 2 to ptr)(ptr @AT_x, ptr %2, ptr %initial_value, i64 1)
   call void @llvm.lifetime.end.p0(i64 -1, ptr %initial_value)
+  store i64 1, ptr %lookup_elem_val, align 8
   br label %lookup_merge
 
 lookup_merge:                                     ; preds = %lookup_failure, %lookup_success
+  %6 = load i64, ptr %lookup_elem_val, align 8
   call void @llvm.lifetime.end.p0(i64 -1, ptr %lookup_elem_val)
-  %log2 = call i64 @log2(i64 10, i64 0)
   %get_cpu_id1 = call i64 inttoptr (i64 8 to ptr)()
-  %5 = load i64, ptr @max_cpu_id, align 8
-  %cpu.id.bounded2 = and i64 %get_cpu_id1, %5
-  %6 = getelementptr [1 x [7 x [8 x i8]]], ptr @map_key_buf, i64 0, i64 %cpu.id.bounded2, i64 1, i64 0
-  store i64 %log2, ptr %6, align 8
-  %lookup_elem3 = call ptr inttoptr (i64 1 to ptr)(ptr @AT_y, ptr %6)
-  call void @llvm.lifetime.start.p0(i64 -1, ptr %lookup_elem_val7)
-  %map_lookup_cond8 = icmp ne ptr %lookup_elem3, null
-  br i1 %map_lookup_cond8, label %lookup_success4, label %lookup_failure5
-
-lookup_success4:                                  ; preds = %lookup_merge
-  %7 = load i64, ptr %lookup_elem3, align 8
-  %8 = add i64 %7, 1
-  store i64 %8, ptr %lookup_elem3, align 8
-  br label %lookup_merge6
-
-lookup_failure5:                                  ; preds = %lookup_merge
-  call void @llvm.lifetime.start.p0(i64 -1, ptr %initial_value9)
-  store i64 1, ptr %initial_value9, align 8
-  %update_elem10 = call i64 inttoptr (i64 2 to ptr)(ptr @AT_y, ptr %6, ptr %initial_value9, i64 1)
-  call void @llvm.lifetime.end.p0(i64 -1, ptr %initial_value9)
-  br label %lookup_merge6
-
-lookup_merge6:                                    ; preds = %lookup_failure5, %lookup_success4
-  call void @llvm.lifetime.end.p0(i64 -1, ptr %lookup_elem_val7)
-  %get_cpu_id11 = call i64 inttoptr (i64 8 to ptr)()
+  %7 = load i64, ptr @max_cpu_id, align 8
+  %cpu.id.bounded2 = and i64 %get_cpu_id1, %7
+  %8 = getelementptr [1 x [7 x [8 x i8]]], ptr @map_key_buf, i64 0, i64 %cpu.id.bounded2, i64 1, i64 0
+  store i64 1, ptr %8, align 8
+  %get_cpu_id3 = call i64 inttoptr (i64 8 to ptr)()
   %9 = load i64, ptr @max_cpu_id, align 8
-  %cpu.id.bounded12 = and i64 %get_cpu_id11, %9
-  %10 = getelementptr [1 x [7 x [8 x i8]]], ptr @map_key_buf, i64 0, i64 %cpu.id.bounded12, i64 2, i64 0
-  store i64 1, ptr %10, align 8
-  %lookup_elem13 = call ptr inttoptr (i64 1 to ptr)(ptr @AT_x, ptr %10)
-  %has_key = icmp ne ptr %lookup_elem13, null
-  %get_cpu_id14 = call i64 inttoptr (i64 8 to ptr)()
+  %cpu.id.bounded4 = and i64 %get_cpu_id3, %9
+  %10 = getelementptr [1 x [1 x [8 x i8]]], ptr @write_map_val_buf, i64 0, i64 %cpu.id.bounded4, i64 0, i64 0
+  store i64 %6, ptr %10, align 8
+  %update_elem5 = call i64 inttoptr (i64 2 to ptr)(ptr @AT_x, ptr %8, ptr %10, i64 0)
+  %log2 = call i64 @log2(i64 10, i64 0)
+  %get_cpu_id6 = call i64 inttoptr (i64 8 to ptr)()
   %11 = load i64, ptr @max_cpu_id, align 8
-  %cpu.id.bounded15 = and i64 %get_cpu_id14, %11
-  %12 = getelementptr [1 x [7 x [8 x i8]]], ptr @map_key_buf, i64 0, i64 %cpu.id.bounded15, i64 3, i64 0
-  store i64 1, ptr %12, align 8
-  %delete_elem = call i64 inttoptr (i64 3 to ptr)(ptr @AT_x, ptr %12)
+  %cpu.id.bounded7 = and i64 %get_cpu_id6, %11
+  %12 = getelementptr [1 x [7 x [8 x i8]]], ptr @map_key_buf, i64 0, i64 %cpu.id.bounded7, i64 2, i64 0
+  store i64 %log2, ptr %12, align 8
+  %lookup_elem8 = call ptr inttoptr (i64 1 to ptr)(ptr @AT_y, ptr %12)
+  call void @llvm.lifetime.start.p0(i64 -1, ptr %lookup_elem_val12)
+  %map_lookup_cond13 = icmp ne ptr %lookup_elem8, null
+  br i1 %map_lookup_cond13, label %lookup_success9, label %lookup_failure10
+
+lookup_success9:                                  ; preds = %lookup_merge
+  %13 = load i64, ptr %lookup_elem8, align 8
+  %14 = add i64 %13, 1
+  store i64 %14, ptr %lookup_elem8, align 8
+  %15 = load i64, ptr %lookup_elem8, align 8
+  store i64 %15, ptr %lookup_elem_val12, align 8
+  br label %lookup_merge11
+
+lookup_failure10:                                 ; preds = %lookup_merge
+  call void @llvm.lifetime.start.p0(i64 -1, ptr %initial_value14)
+  store i64 1, ptr %initial_value14, align 8
+  %update_elem15 = call i64 inttoptr (i64 2 to ptr)(ptr @AT_y, ptr %12, ptr %initial_value14, i64 1)
+  call void @llvm.lifetime.end.p0(i64 -1, ptr %initial_value14)
+  store i64 1, ptr %lookup_elem_val12, align 8
+  br label %lookup_merge11
+
+lookup_merge11:                                   ; preds = %lookup_failure10, %lookup_success9
+  %16 = load i64, ptr %lookup_elem_val12, align 8
+  call void @llvm.lifetime.end.p0(i64 -1, ptr %lookup_elem_val12)
+  %get_cpu_id16 = call i64 inttoptr (i64 8 to ptr)()
+  %17 = load i64, ptr @max_cpu_id, align 8
+  %cpu.id.bounded17 = and i64 %get_cpu_id16, %17
+  %18 = getelementptr [1 x [7 x [8 x i8]]], ptr @map_key_buf, i64 0, i64 %cpu.id.bounded17, i64 3, i64 0
+  store i64 1, ptr %18, align 8
+  %lookup_elem18 = call ptr inttoptr (i64 1 to ptr)(ptr @AT_x, ptr %18)
+  %has_key = icmp ne ptr %lookup_elem18, null
+  %get_cpu_id19 = call i64 inttoptr (i64 8 to ptr)()
+  %19 = load i64, ptr @max_cpu_id, align 8
+  %cpu.id.bounded20 = and i64 %get_cpu_id19, %19
+  %20 = getelementptr [1 x [7 x [8 x i8]]], ptr @map_key_buf, i64 0, i64 %cpu.id.bounded20, i64 4, i64 0
+  store i64 1, ptr %20, align 8
+  %delete_elem = call i64 inttoptr (i64 3 to ptr)(ptr @AT_x, ptr %20)
   ret i64 0
 }
 
