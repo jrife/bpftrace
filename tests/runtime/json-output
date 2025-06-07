@@ -55,6 +55,18 @@ NAME multiple linear histograms
 PROG BEGIN { @stats["bpftrace"] = lhist(2, 0, 100, 10); @stats["curl"] = lhist(50, 0, 100, 10); @stats["bpftrace"] = lhist(1000, 0, 100, 10); exit(); }
 EXPECT_JSON runtime/outputs/lhist_multiple.json
 
+NAME tseries
+PROG BEGIN { @h = tseries(2, 0, 100, 10); @h = tseries(50, 0, 100, 10); @h = tseries(1000, 0, 100, 10); exit(); }
+EXPECT_JSON runtime/outputs/tseries.json
+
+NAME tseries zero
+PROG BEGIN { @h = tseries(2, 0, 100, 10); zero(@h); exit(); }
+EXPECT_JSON runtime/outputs/tseries_zero.json
+
+NAME multiple tseries
+PROG BEGIN { @stats["bpftrace"] = tseries(2, 0, 100, 10); @stats["curl"] = tseries(50, 0, 100, 10); @stats["bpftrace"] = tseries(1000, 0, 100, 10); exit(); }
+EXPECT_JSON runtime/outputs/tseries_multiple.json
+
 NAME stats
 PROG BEGIN { @stats = stats(2); @stats = stats(10); exit(); }
 EXPECT_JSON runtime/outputs/stats.json

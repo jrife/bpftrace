@@ -89,6 +89,16 @@ Each runtime testcase consists of multiple directives. In no particular order:
    text after stripping initial and final empty lines
 * `EXPECT_JSON`: A json file containing the expected output, matched after
    converting the output and the file to a dict (thus ignoring field order).
+* `TIMESTAMP_INTERVAL`: Expect there to be a timestamp string wherever
+  "$timestamp" appears in the expected output. Each timestamp should be spaced
+  apart by the specified duration. Duration strings can be in units of seconds
+  (s), milliseconds (ms), microseconds (us), or nanoseconds (ns), but not a
+  combination of the four.
+  ```
+  NAME with-timestamps
+  EXPECT $timestamp one $timestamp two
+  TIMESTAMP_INTERVAL 1s
+  ```
 * `TIMEOUT`: The timeout for the testcase (in seconds). This field is required.
 * `BEFORE`: Run the command in a shell before running bpftrace. The command
   will run while bpftrace is running and be terminated after the test case
