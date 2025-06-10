@@ -1133,6 +1133,22 @@ ScopedExpr CodegenLLVM::visit(Call &call)
         Value *is_set = b_.CreateLoad(
             b_.getInt64Ty(),
             b_.CreateGEP(val_ty, val_ptr, { b_.getInt64(0), b_.getInt32(1) }));
+
+        // It's not very meaningful to just capture snapshots
+        // of the average. If we capture ten average snapshots we just use the
+        // last one. Kind of dumb, no?
+        // Value *total_val = b_.CreateLoad(b_.getInt64Ty(),
+        //                                  b_.CreateGEP(avg_struct_ty,
+        //                                               lookup,
+        //                                               { b_.getInt64(0),
+        //                                                 b_.getInt32(0) }));
+        //
+        // Value *count_val = b_.CreateLoad(b_.getInt64Ty(),
+        //                                  b_.CreateGEP(avg_struct_ty,
+        //                                               lookup,
+        //                                               { b_.getInt64(0),
+        //                                                 b_.getInt32(1) }));
+
         b_.CreateCondBr(b_.CreateICmpNE(is_set, b_.getInt64(0), "is_set_cond"),
                         update_bucket_block,
                         merge_block);

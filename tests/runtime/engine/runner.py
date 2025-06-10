@@ -247,105 +247,92 @@ class Runner(object):
         def get_pid_ns_cmd(cmd):
             return nsenter + [os.path.abspath(x) for x in cmd.split()]
 
-        def parse_interval(interval):
-            ns_per_us = 1000
-            ns_per_ms = ns_per_us * 1000
-            ns_per_s  = ns_per_ms * 1000
-            ns_per_unit = {
-                "s": ns_per_s,
-                "ms": ns_per_ms,
-                "us": ns_per_us,
-                "ns": 1
-            }
+        def timestamps(output, interval, format):
+            def find_start_time(output, format):
+                lengths = {
+                    "%Y": 4, "%m": 2, "%d": 2, "%H": 2, "%M": 2, "%S": 2,
+                    "%l": 3, "%f": 6, "%k": 9
+                }
+                sub_second_specifiers = {"%l","%f","%k"}
+                sub_sec = ""
+                rgx = format
+                groups = {}
 
-            m = re.match(r"^(\d+)(s|ms|us|ns)$", interval)
+                print("a")
+                for i, s in enumerate(re.findall(r"%[YmdHMSlfk]", format)):
+                    if s in groups:
+                        raise ValueError("Timestamp format string %s repeats format specifier %", (format, s))
 
-            if m is None:
-                raise ValueError("Invalid invterval: %s" % interval)
+                    if s in sub_second_specifiers:
+                        if sub_sec != "":
+                            raise ValueError("Only one of %l, %f, or %k can be specified: %s" % format)
+                        sub_sec = s
+                    groups[s] = i+1
+                    rgx = rgx.replace(s, "(\\d{%d})" % lengths[s])
 
-            interval_ns = 0
-            ts_regex    = "(\\d{2}):(\\d{2}):(\\d{2})"
-            n           = int(m.group(1))
-            unit        = m.group(2)
+                print("b", rgx, output)
+                m = re.search(rgx, output)
+                if m is None:
+                    raise ValueError("String does not contain timestamps of format: %s" % format)
 
-            match unit:
-                case "s":
-                    interval_td = datetime.timedelta(seconds=n)
-                case "ms":
-                    interval_td = datetime.timedelta(microseconds=n*1000)
-                    ts_regex += "\\.(\\d{3})"
-                case "us":
-                    interval_td = datetime.timedelta(microseconds=n)
-                    ts_regex += "\\.(\\d{6})"
-                case "ns":
-                    interval_td = datetime.timedelta(microseconds=n/1000)
-                    interval_ns = n%1000
-                    ts_regex += "\\.(\\d{9})"
+                print("c")
+                start_ts = m.group(0)
+                start_ts_ns = 0
 
-            return interval_td, interval_ns, re.compile(ts_regex)
+                if sub_sec == "%l":   # millisecond
+                    start_ts = start_ts[:m.end(groups[sub_sec])] + "000" + start_ts[m.end(groups[sub_sec]):]
+                    format = format.replace("%l", "%f")
+                elif sub_sec == "%k": # nanosecond
+                    start_ts_ns = int(start_ts[m.start(groups[sub_sec]):m.end(groups[sub_sec])][-3:])
+                    start_ts = start_ts[:m.end(groups[sub_sec])-3] + start_ts[m.end(groups[sub_sec]):]
+                    format = format.replace("%k", "%f")
 
-        def find_starting_time(s, ts_regex):
-            print(s)
-            print(ts_regex)
-            ts = ts_regex.search(s)
+                print("d")
+                return datetime.datetime.strptime(start_ts, format), start_ts_ns
 
-            if ts is None:
-                raise ValueError("String does not contain timestamps: %s" % str(ts_regex))
+            def parse_interval(interval):
+                m = re.match(r"^(\d+)(s|ms|us)$", interval)
+                if m is None:
+                    raise ValueError("Invalid invterval: %s" % interval)
 
-            h  = int(ts.group(1))
-            m  = int(ts.group(2))
-            s  = int(ts.group(3))
-            us = 0
-            ns = 0
+                n = int(m.group(1))
 
-            if len(ts.groups()) == 4:
-                rem = ts.group(4)
+                match m.group(2):
+                    case "s":
+                        td = datetime.timedelta(seconds=n)
+                    case "ms":
+                        td = datetime.timedelta(microseconds=n*1000)
+                    case "us":
+                        td = datetime.timedelta(microseconds=n)
 
-                if len(rem) == 3:
-                    us = int(rem) * 1000
-                elif len(rem) == 6:
-                    us = int(rem)
-                elif len(rem) == 9:
-                    us = int(rem) / 1000
-                    ns = int(rem) % 1000
+                return td
 
-            return datetime.time(hour=h, minute=m, second=s, microsecond=us), ns
+            def strftime(dt, dt_ns, format):
+                if "%k" in format:
+                    format = format.replace("%k", "%f%03d" % dt_ns)
+                if "%l" in format:
+                    format = format.replace("%l", "%03d" % (dt.microsecond / 1000))
 
-        def timestamp_str(ts, ts_ns, interval_td, interval_ns):
-            fmt = "%H:%M:%S"
+                print("next", dt.strftime(format))
+                return dt.strftime(format)
 
-            if interval_td.microseconds != 0 or interval_ns != 0:
-                fmt += ".%f"
-
-            s = ts.strftime(fmt)
-
-            if interval_td.microseconds >= 1000:
-                s = s[:-3]
-            elif interval_ns != 0:
-                s += str(ts_ns)
-
-            return s
-
-        def timestamps_from(ts, ts_ns, interval_td, interval_ns):
-            ns_per_us = 1000
+            print("one")
+            dt, dt_ns = find_start_time(output, format)
+            print("two")
+            td = parse_interval(interval)
+            print("three")
 
             while True:
-                yield timestamp_str(ts, ts_ns, interval_td, interval_ns)
+                yield strftime(dt, dt_ns, format)
+                dt += td
 
-                ts_ns += interval_ns
-                if ts_ns > ns_per_us:
-                    ts = (datetime.datetime.combine(datetime.date.today(), ts) + datetime.timedelta(microseconds=interval_ns/ns_per_us)).time()
-                    ts_ns %= ns_per_us
+        def render_timestamps(template, output, interval, format):
+            print("interval", interval)
+            print("format", format)
+            ts = timestamps(output, interval, format)
 
-                ts = (datetime.datetime.combine(datetime.date.today(), ts) + interval_td).time()
-
-        def generate_timestamps(template, output, interval):
-            interval_td, interval_ns, ts_regex = parse_interval(interval)
-            start_ts, start_ts_ns   = find_starting_time(output, ts_regex)
-            gen = timestamps_from(start_ts, start_ts_ns, interval_td, interval_ns)
-
-            for i in range(template.count("$timestamp")):
-                template = template.replace("$timestamp", next(gen), 1)
+            for _ in range(template.count("$timestamp")):
+                template = template.replace("$timestamp", next(ts), 1)
 
             return template
 
@@ -353,12 +340,12 @@ class Runner(object):
             try:
                 if expect.mode == "text":
                     if test.timestamp_interval:
-                        expect.expect = generate_timestamps(expect.expect, output, test.timestamp_interval)
+                        expect.expect = render_timestamps(expect.expect, output, test.timestamp_interval, test.timestamp_format)
                     # Raw text match on an entire line, ignoring leading/trailing whitespace
                     return re.search(f"^\\s*{re.escape(expect.expect)}\\s*$", output, re.M)
                 elif expect.mode == "text_none":
                     if test.timestamp_interval:
-                        expect.expect = generate_timestamps(expect.expect, output, test.timestamp_interval)
+                        expect.expect = render_timestamps(expect.expect, output, test.timestamp_interval, test.timestamp_format)
                     return not re.search(f"^\\s*{re.escape(expect.expect)}\\s*$", output, re.M)
                 elif expect.mode == "regex":
                     return re.search(expect.expect, output, re.M)
@@ -369,7 +356,7 @@ class Runner(object):
                         # remove leading and trailing empty lines
                         expect.expect = expect_file.read().strip()
                         if test.timestamp_interval:
-                            expect.expect = generate_timestamps(expect.expect, output, test.timestamp_interval)
+                            expect.expect = render_timestamps(expect.expect, output, test.timestamp_interval, test.timestamp_format)
                         print(output.strip())
                         print(expect.expect)
                         return output.strip() == expect.expect
@@ -380,9 +367,6 @@ class Runner(object):
                         expect.expect = expect_file_content
                         stripped_output = output.strip()
                         output_lines = stripped_output.splitlines()
-
-                        if test.timestamp_interval:
-                            expect.expect = generate_timestamps(expect.expect, output, test.timestamp_interval)
 
                         # ndjson files are new line delimited blocks of json
                         # https://github.com/ndjson/ndjson-spec
@@ -402,6 +386,8 @@ class Runner(object):
                         if len(output_lines) != 1:
                             print(f"Expected a single line of json ouput. Got {len(output_lines)} lines")
                             return False
+                        if test.timestamp_interval:
+                            expect.expect = render_timestamps(expect.expect, output, test.timestamp_interval, test.timestamp_format)
                         return json.loads(stripped_output) == json.loads(expect.expect)
 
 

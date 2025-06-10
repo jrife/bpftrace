@@ -326,9 +326,29 @@ PROG BEGIN { @=lhist(2,0,10,2); @=lhist(3,0,10,2); @=lhist(7,0,10,2); @=lhist(-1
 EXPECT_FILE runtime/outputs/lhist.txt
 
 NAME tseries
-PROG config = { enable_tseries = 1 } BEGIN { @c = 0; } i:ms:1 { @=tseries(@c,"1ms",5); @c++; if (@c == 5) { clear(@c); exit(); } }
+PROG config = { enable_tseries = 1 } BEGIN { @c = 0; } i:ms:10 { @=tseries(@c,"10ms",5); @c++; if (@c == 5) { clear(@c); exit(); } }
 EXPECT_FILE runtime/outputs/tseries.txt
-TIMESTAMP_INTERVAL 1ms
+TIMESTAMPS %H:%M:%S.%l 10ms
+
+NAME tseries_min
+PROG config = { enable_tseries = 1 } BEGIN { @c = 0; } i:ms:10 { @m = min(@c); @=tseries(@m,"10ms",5); @c++; if (@c == 5) { clear(@m); clear(@c); exit(); } }
+EXPECT_FILE runtime/outputs/tseries_min.txt
+TIMESTAMPS %H:%M:%S.%l 10ms
+
+NAME tseries_max
+PROG config = { enable_tseries = 1 } BEGIN { @c = 5; } i:ms:10 { @m = max(@c); @=tseries(@m,"10ms",5); @c--; if (@c == 0) { clear(@m); clear(@c); exit(); } }
+EXPECT_FILE runtime/outputs/tseries_max.txt
+TIMESTAMPS %H:%M:%S.%l 10ms
+
+NAME tseries_count
+PROG config = { enable_tseries = 1 } BEGIN { @c = 0; } i:ms:10 { @m = count(); @=tseries(@m,"10ms",5); @c++; if (@c == 5) { clear(@m); clear(@c); exit(); } }
+EXPECT_FILE runtime/outputs/tseries_count.txt
+TIMESTAMPS %H:%M:%S.%l 10ms
+
+NAME tseries_avg
+PROG config = { enable_tseries = 1 } BEGIN { @c = 0; } i:ms:10 { @m = avg(@c); @=tseries(@m,"10ms",5); @c++; if (@c == 5) { clear(@m); clear(@c); exit(); } }
+EXPECT_FILE runtime/outputs/tseries_avg.txt
+TIMESTAMPS %H:%M:%S.%l 10ms
 
 NAME kstack
 PROG k:do_nanosleep { printf("%s\n%s\n", kstack(), kstack(1)); exit(); }
