@@ -64,7 +64,7 @@ enum class ExpansionType {
 
 class Node {
 public:
-  Node(Diagnostics &d, Location &&loc) : diagnostics_(d), loc(loc) {};
+  Node(Diagnostics &d, Location &&loc) : diagnostics_(d), loc(loc){};
   virtual ~Node() = default;
 
   Node(const Node &) = delete;
@@ -105,7 +105,7 @@ class Map;
 class Variable;
 class Expression : public Node {
 public:
-  Expression(Diagnostics &d, Location &&loc) : Node(d, std::move(loc)) {};
+  Expression(Diagnostics &d, Location &&loc) : Node(d, std::move(loc)){};
   ~Expression() override = default;
 
   SizedType type;
@@ -187,6 +187,7 @@ public:
 
   std::string func;
   ExpressionList vargs;
+  bool is_arg;
 };
 
 class Sizeof : public Expression {
@@ -316,7 +317,7 @@ public:
 
 class Statement : public Node {
 public:
-  Statement(Diagnostics &d, Location &&loc) : Node(d, std::move(loc)) {};
+  Statement(Diagnostics &d, Location &&loc) : Node(d, std::move(loc)){};
 };
 
 using StatementList = std::vector<Statement *>;

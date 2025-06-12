@@ -487,6 +487,9 @@ CallInst *IRBuilderBPF::createMapLookup(const std::string &map_name,
                                         const std::string &name)
 {
   Value *map_ptr = GetMapVar(map_name);
+
+  if (map_ptr == nullptr)
+    LOG(BUG) << map_name << " does not exist";
   // void *map_lookup_elem(struct bpf_map * map, void * key)
   // Return: Map value or NULL
 
@@ -2232,11 +2235,11 @@ void IRBuilderBPF::CreateMapElemInit(Value *ctx,
   CreateLifetimeEnd(initValue);
 }
 
-void IRBuilderBPF::CreateMapElemAdd(Value *ctx,
-                                    Map &map,
-                                    Value *key,
-                                    Value *val,
-                                    const Location &loc)
+Value *IRBuilderBPF::CreateMapElemAdd(Value *ctx,
+                                      Map &map,
+                                      Value *key,
+                                      Value *val,
+                                      const Location &loc)
 {
   CallInst *call = CreateMapLookup(map, key);
   SizedType &type = map.type;
@@ -2264,16 +2267,20 @@ void IRBuilderBPF::CreateMapElemAdd(Value *ctx,
   auto *cast = CreatePtrToInt(call, value->getType(), "cast");
   CreateStore(CreateAdd(CreateLoad(value->getAllocatedType(), cast), val),
               cast);
+  CreateStore(CreateLoad(value->getAllocatedType(), cast), value);
 
   CreateBr(lookup_merge_block);
 
   SetInsertPoint(lookup_failure_block);
 
   CreateMapElemInit(ctx, map, key, val, loc);
+  CreateStore(val, value);
 
   CreateBr(lookup_merge_block);
   SetInsertPoint(lookup_merge_block);
+  Value *result = CreateLoad(value->getAllocatedType(), value);
   CreateLifetimeEnd(value);
+  return result;
 }
 
 void IRBuilderBPF::CreatePerfEventOutput(Value *ctx,

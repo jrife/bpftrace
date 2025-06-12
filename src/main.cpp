@@ -987,13 +987,25 @@ int main(int argc, char* argv[])
     output_ir = std::ofstream(args.output_llvm + ".original.ll");
     pm.add(ast::CreateDumpIRPass(*output_ir));
   }
+  pm.add(ast::Pass::create("one", [&] {
+    std::cout << "ONE\n";
+    std::cout << "---------------------------\n\n";
+  }));
   bool verify_llvm_ir = false;
   util::get_bool_env_var("BPFTRACE_VERIFY_LLVM_IR",
                          [&](bool x) { verify_llvm_ir = x; });
   if (verify_llvm_ir) {
     pm.add(ast::CreateVerifyPass());
   }
+  pm.add(ast::Pass::create("two", [&] {
+    std::cout << "TWO\n";
+    std::cout << "---------------------------\n\n";
+  }));
   pm.add(ast::CreateOptimizePass());
+  pm.add(ast::Pass::create("three", [&] {
+    std::cout << "THREEE\n";
+    std::cout << "---------------------------\n\n";
+  }));
   if (bt_debug.contains(DebugStage::CodegenOpt)) {
     pm.add(ast::Pass::create("dump-ir-opt-prefix", [&] {
       std::cout << "\nLLVM IR after optimization\n";

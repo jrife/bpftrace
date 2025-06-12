@@ -806,9 +806,8 @@ ScopedExpr CodegenLLVM::visit(Call &call)
   if (call.func == "count") {
     Map &map = *call.map;
     auto scoped_key = getMapKey(map);
-    b_.CreateMapElemAdd(
-        ctx_, map, scoped_key.value(), b_.getInt64(1), call.loc);
-    return ScopedExpr();
+    return ScopedExpr(b_.CreateMapElemAdd(
+        ctx_, map, scoped_key.value(), b_.getInt64(1), call.loc));
 
   } else if (call.func == "sum") {
     Map &map = *call.map;
@@ -818,13 +817,14 @@ ScopedExpr CodegenLLVM::visit(Call &call)
     Value *cast = b_.CreateIntCast(scoped_expr.value(),
                                    b_.getInt64Ty(),
                                    call.vargs.front()->type.IsSigned());
-    b_.CreateMapElemAdd(ctx_, map, scoped_key.value(), cast, call.loc);
-    return ScopedExpr();
+    return ScopedExpr(
+        b_.CreateMapElemAdd(ctx_, map, scoped_key.value(), cast, call.loc));
 
   } else if (call.func == "max" || call.func == "min") {
     bool is_max = call.func == "max";
     Map &map = *call.map;
 
+    AllocaInst *mm_result = b_.CreateAllocaBPF(b_.getInt64Ty(), "mm_result");
     ScopedExpr scoped_key = getMapKey(map);
     CallInst *lookup = b_.CreateMapLookup(map, scoped_key.value());
     ScopedExpr scoped_expr = visit(*call.vargs.front());
@@ -890,6 +890,8 @@ ScopedExpr CodegenLLVM::visit(Call &call)
                                               : b_.CreateICmpUGE(mm_val, expr);
     }
 
+    b_.CreateStore(mm_val, mm_result);
+
     b_.CreateCondBr(min_max_condition, min_max_block, lookup_merge_block);
 
     b_.SetInsertPoint(min_max_block);
@@ -897,6 +899,7 @@ ScopedExpr CodegenLLVM::visit(Call &call)
     b_.CreateStore(
         expr,
         b_.CreateGEP(mm_struct_ty, lookup, { b_.getInt64(0), b_.getInt32(0) }));
+    b_.CreateStore(expr, mm_result);
     b_.CreateStore(
         b_.getInt64(1),
         b_.CreateGEP(mm_struct_ty, lookup, { b_.getInt64(0), b_.getInt32(1) }));
@@ -911,6 +914,7 @@ ScopedExpr CodegenLLVM::visit(Call &call)
                    b_.CreateGEP(mm_struct_ty,
                                 mm_struct,
                                 { b_.getInt64(0), b_.getInt32(0) }));
+    b_.CreateStore(expr, mm_result);
     b_.CreateStore(b_.getInt64(1),
                    b_.CreateGEP(mm_struct_ty,
                                 mm_struct,
@@ -924,10 +928,12 @@ ScopedExpr CodegenLLVM::visit(Call &call)
     b_.CreateBr(lookup_merge_block);
     b_.SetInsertPoint(lookup_merge_block);
 
-    return ScopedExpr();
+    return ScopedExpr(b_.CreateLoad(b_.getInt64Ty(), mm_result));
 
   } else if (call.func == "avg" || call.func == "stats") {
     Map &map = *call.map;
+
+    AllocaInst *total = b_.CreateAllocaBPF(b_.getInt64Ty(), "total");
 
     ScopedExpr scoped_key = getMapKey(map);
 
@@ -974,14 +980,19 @@ ScopedExpr CodegenLLVM::visit(Call &call)
                                                   { b_.getInt64(0),
                                                     b_.getInt32(1) }));
 
-    b_.CreateStore(b_.CreateAdd(total_val, expr),
+    Value *new_total_val = b_.CreateAdd(total_val, expr);
+
+    b_.CreateStore(new_total_val,
                    b_.CreateGEP(avg_struct_ty,
                                 lookup,
                                 { b_.getInt64(0), b_.getInt32(0) }));
+
     b_.CreateStore(b_.CreateAdd(b_.getInt64(1), count_val),
                    b_.CreateGEP(avg_struct_ty,
                                 lookup,
                                 { b_.getInt64(0), b_.getInt32(1) }));
+
+    b_.CreateStore(new_total_val, total);
 
     b_.CreateBr(lookup_merge_block);
 
@@ -1003,10 +1014,12 @@ ScopedExpr CodegenLLVM::visit(Call &call)
 
     b_.CreateLifetimeEnd(avg_struct);
 
+    b_.CreateStore(expr, total);
+
     b_.CreateBr(lookup_merge_block);
     b_.SetInsertPoint(lookup_merge_block);
 
-    return ScopedExpr();
+    return ScopedExpr(b_.CreateLoad(b_.getInt64Ty(), total));
 
   } else if (call.func == "hist") {
     if (!log2_func_)
@@ -1080,102 +1093,13 @@ ScopedExpr CodegenLLVM::visit(Call &call)
 
     auto *value_arg = call.vargs.at(0);
     auto value_type = value_arg->type;
-    AllocaInst *value = b_.CreateAllocaBPF(b_.getInt64Ty(), "value");
     llvm::Function *parent = b_.GetInsertBlock()->getParent();
     BasicBlock *merge_block = BasicBlock::Create(module_->getContext(),
                                                  "merge",
                                                  parent);
-
-    if (value_type.IsIntegerTy()) {
-      // Integer types are simple; just record the value to the current bucket.
-      ScopedExpr scoped_expr = visit(value_arg);
-      b_.CreateStore(b_.CreateIntCast(scoped_expr.value(),
-                                      b_.getInt64Ty(),
-                                      call.vargs.front()->type.IsSigned()),
-                     value);
-    } else if (value_arg->is_map) {
-      // Non-integer maps (max_t, min_t, avg_t, sum_t, and count_t)
-      Map &val_map = static_cast<Map &>(*value_arg);
-      ScopedExpr scoped_key = getMapKey(val_map);
-      CallInst *lookup = b_.CreateMapLookup(val_map, scoped_key.value());
-      BasicBlock *lookup_success_block = BasicBlock::Create(
-          module_->getContext(), "lookup_success", parent);
-      BasicBlock *lookup_failure_block = BasicBlock::Create(
-          module_->getContext(), "lookup_failure", parent);
-      BasicBlock *update_bucket_block = BasicBlock::Create(
-          module_->getContext(), "update_bucket", parent);
-
-      b_.CreateCondBr(
-          b_.CreateICmpNE(b_.CreateIntCast(lookup, b_.getPtrTy(), true),
-                          b_.GetNull(),
-                          "lookup_cond"),
-          lookup_success_block,
-          lookup_failure_block);
-
-      b_.SetInsertPoint(lookup_success_block);
-      llvm::Type *val_ty = b_.GetMapValueType(val_map.type);
-      Value *val_ptr = b_.CreatePointerCast(lookup,
-                                            val_ty->getPointerTo(),
-                                            "cast");
-
-      b_.CreateStore(b_.CreateLoad(b_.getInt64Ty(),
-                                   b_.CreateGEP(val_ty,
-                                                val_ptr,
-                                                { b_.getInt64(0),
-                                                  b_.getInt32(0) })),
-                     value);
-
-      if (value_type.GetTy() == Type::max_t ||
-          value_type.GetTy() == Type::min_t ||
-          value_type.GetTy() == Type::avg_t) {
-        // For max_t, min_t, and avg_t, we dont want to do anything if the
-        // values aren't set rather than recording zero.
-        Value *is_set = b_.CreateLoad(
-            b_.getInt64Ty(),
-            b_.CreateGEP(val_ty, val_ptr, { b_.getInt64(0), b_.getInt32(1) }));
-
-        // It's not very meaningful to just capture snapshots
-        // of the average. If we capture ten average snapshots we just use the
-        // last one. Kind of dumb, no?
-        // Value *total_val = b_.CreateLoad(b_.getInt64Ty(),
-        //                                  b_.CreateGEP(avg_struct_ty,
-        //                                               lookup,
-        //                                               { b_.getInt64(0),
-        //                                                 b_.getInt32(0) }));
-        //
-        // Value *count_val = b_.CreateLoad(b_.getInt64Ty(),
-        //                                  b_.CreateGEP(avg_struct_ty,
-        //                                               lookup,
-        //                                               { b_.getInt64(0),
-        //                                                 b_.getInt32(1) }));
-
-        b_.CreateCondBr(b_.CreateICmpNE(is_set, b_.getInt64(0), "is_set_cond"),
-                        update_bucket_block,
-                        merge_block);
-      } else {
-        b_.CreateBr(update_bucket_block);
-      }
-
-      b_.SetInsertPoint(lookup_failure_block);
-
-      if (value_type.GetTy() == Type::max_t ||
-          value_type.GetTy() == Type::min_t ||
-          value_type.GetTy() == Type::avg_t) {
-        // For max_t, min_t, and avg_t, a lookup failure is the same as being
-        // unset, so we jump to the end and don't record anything if the lookup
-        // fails rather than recording 0 to the current bucket.
-        b_.CreateBr(merge_block);
-      } else {
-        // For count_t and sum_t, it's OK to record 0 even if they have not
-        // yet been set.
-        b_.CreateStore(b_.getInt64(0), value);
-        b_.CreateBr(update_bucket_block);
-      }
-
-      b_.SetInsertPoint(update_bucket_block);
-    } else {
-      LOG(BUG) << "value type: expected integer or map";
-    }
+    BasicBlock *maybe_clear_block = BasicBlock::Create(module_->getContext(),
+                                                       "maybe_clear",
+                                                       parent);
 
     Value *interval, *buckets;
     interval = b_.getInt64(map_info->second.tseries_args->interval_ns);
@@ -1188,6 +1112,8 @@ ScopedExpr CodegenLLVM::visit(Call &call)
     auto scoped_key = getHistMapKey(map, bucket, call.loc);
 
     llvm::Type *ts_struct_ty = b_.GetMapValueType(map.type);
+    AllocaInst *ts_struct_ptr = b_.CreateAllocaBPF(ts_struct_ty->getPointerTo(),
+                                                   "ts_struct_ptr");
     CallInst *lookup = b_.CreateMapLookup(map, scoped_key.value());
     SizedType &type = map.type;
 
@@ -1207,48 +1133,125 @@ ScopedExpr CodegenLLVM::visit(Call &call)
 
     b_.SetInsertPoint(lookup_success_block);
 
-    auto *cast = b_.CreatePointerCast(lookup,
-                                      ts_struct_ty->getPointerTo(),
-                                      "cast");
+    b_.CreateStore(
+        b_.CreatePointerCast(lookup, ts_struct_ty->getPointerTo(), "cast"),
+        ts_struct_ptr);
 
-    b_.CreateStore(
-        b_.CreateLoad(b_.getInt64Ty(), value),
-        b_.CreateGEP(ts_struct_ty, cast, { b_.getInt64(0), b_.getInt32(0) }));
-    b_.CreateStore(
-        now,
-        b_.CreateGEP(ts_struct_ty, cast, { b_.getInt64(0), b_.getInt32(1) }));
-    b_.CreateStore(
-        epoch,
-        b_.CreateGEP(ts_struct_ty, cast, { b_.getInt64(0), b_.getInt32(2) }));
+    b_.CreateBr(maybe_clear_block);
 
-    b_.CreateBr(merge_block);
     b_.SetInsertPoint(lookup_failure_block);
 
     AllocaInst *ts_struct = b_.CreateAllocaBPF(ts_struct_ty, "ts_struct");
 
-    b_.CreateStore(b_.CreateLoad(b_.getInt64Ty(), value),
+    b_.CreateStore(b_.getInt64(0),
                    b_.CreateGEP(ts_struct_ty,
                                 ts_struct,
                                 { b_.getInt64(0), b_.getInt32(0) }));
-    b_.CreateStore(now,
+
+    b_.CreateStore(b_.getInt64(0),
                    b_.CreateGEP(ts_struct_ty,
                                 ts_struct,
                                 { b_.getInt64(0), b_.getInt32(1) }));
-    b_.CreateStore(epoch,
+
+    b_.CreateStore(b_.getInt64(0),
                    b_.CreateGEP(ts_struct_ty,
                                 ts_struct,
                                 { b_.getInt64(0), b_.getInt32(2) }));
 
-    b_.CreateMapUpdateElem(
-        ctx_, map.ident, scoped_key.value(), ts_struct, call.loc);
+    b_.CreateStore(ts_struct, ts_struct_ptr);
 
-    b_.CreateLifetimeEnd(ts_struct);
+    b_.CreateBr(maybe_clear_block);
+
+    b_.SetInsertPoint(maybe_clear_block);
+
+    if (value_arg->map) {
+      Value *ptr = b_.CreateLoad(ts_struct_ty->getPointerTo(), ts_struct_ptr);
+      Value *old_epoch = b_.CreateLoad(
+          b_.getInt64Ty(),
+          b_.CreateGEP(ts_struct_ty, ptr, { b_.getInt64(0), b_.getInt32(2) }));
+      BasicBlock *try_clear_block = BasicBlock::Create(module_->getContext(),
+                                                       "try_clear",
+                                                       parent);
+      BasicBlock *clear_block = BasicBlock::Create(module_->getContext(),
+                                                   "clear",
+                                                   parent);
+
+      b_.CreateCondBr(b_.CreateICmpNE(old_epoch, epoch, "new_epoch"),
+                      try_clear_block,
+                      merge_block);
+
+      b_.SetInsertPoint(try_clear_block);
+
+      Map &map = *value_arg->map;
+      ScopedExpr scoped_key = getMapKey(map);
+      CallInst *lookup = b_.CreateMapLookup(map, scoped_key.value());
+
+      b_.CreateCondBr(
+          b_.CreateICmpNE(b_.CreateIntCast(lookup, b_.getPtrTy(), true),
+                          b_.GetNull(),
+                          "map_lookup_cond"),
+          clear_block,
+          merge_block);
+
+      b_.SetInsertPoint(clear_block);
+
+      uint32_t sz = map.type.GetSize();
+
+      if (value_type.IsAvgTy() || value_type.IsMinTy() ||
+          value_type.IsMaxTy()) {
+        sz = map.type.GetSize() * 2;
+        LOG(ERROR) << "sz = " << sz;
+      }
+
+      b_.CreateMemsetBPF(lookup, b_.getInt8(0), sz);
+
+      // Clear the current count.
+      if (value_type.IsAvgTy()) {
+        b_.CreateStore(b_.getInt64(0),
+                       b_.CreateGEP(ts_struct_ty,
+                                    b_.CreateLoad(ts_struct_ty->getPointerTo(),
+                                                  ts_struct_ptr),
+                                    { b_.getInt64(0), b_.getInt32(1) }));
+      }
+
+      b_.CreateBr(merge_block);
+    }
 
     b_.CreateBr(merge_block);
 
     b_.SetInsertPoint(merge_block);
 
-    b_.CreateLifetimeEnd(value);
+    Value *ptr = b_.CreateLoad(ts_struct_ty->getPointerTo(), ts_struct_ptr);
+    Value *meta = b_.CreateLoad(
+        b_.getInt64Ty(),
+        b_.CreateGEP(ts_struct_ty, ptr, { b_.getInt64(0), b_.getInt32(1) }));
+
+    ScopedExpr scoped_expr = visit(value_arg);
+
+    b_.CreateStore(
+        b_.CreateIntCast(scoped_expr.value(),
+                         b_.getInt64Ty(),
+                         call.vargs.front()->type.IsSigned()),
+        b_.CreateGEP(ts_struct_ty, ptr, { b_.getInt64(0), b_.getInt32(0) }));
+
+    if (value_type.IsIntegerTy()) {
+      b_.CreateStore(
+          now,
+          b_.CreateGEP(ts_struct_ty, ptr, { b_.getInt64(0), b_.getInt32(1) }));
+    } else if (value_type.IsAvgTy()) {
+      b_.CreateStore(
+          b_.CreateAdd(meta, b_.getInt64(1)),
+          b_.CreateGEP(ts_struct_ty, ptr, { b_.getInt64(0), b_.getInt32(1) }));
+    }
+
+    b_.CreateStore(
+        epoch,
+        b_.CreateGEP(ts_struct_ty, ptr, { b_.getInt64(0), b_.getInt32(2) }));
+
+    b_.CreateMapUpdateElem(ctx_, map.ident, scoped_key.value(), ptr, call.loc);
+
+    b_.CreateLifetimeEnd(ts_struct);
+    b_.CreateLifetimeEnd(ts_struct_ptr);
 
     return ScopedExpr();
   } else if (call.func == "delete") {

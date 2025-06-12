@@ -866,6 +866,20 @@ void SemanticAnalyser::visit(Call &call)
       }
     }
 
+    if (i == 0 && call.func == "tseries") {
+      auto *inner_call = dynamic_cast<Call *>(&expr);
+
+      if (inner_call) {
+        if (!inner_call->map) {
+          expr.map = ctx_.make_node<Map>("inner_map", Location(call.loc));
+          expr.map->key_type = CreateNone();
+          inner_call->is_arg = true;
+        } else {
+          expr.map->type = inner_call->type;
+        }
+      }
+    }
+
     visit(expr);
   }
 
@@ -1014,13 +1028,17 @@ void SemanticAnalyser::visit(Call &call)
     }
     call.type = CreateTSeries();
   } else if (call.func == "count") {
-    check_assignment(call, true, false, false);
+    if (is_final_pass()) {
+      check_assignment(call, true, false, false);
+    }
     (void)check_nargs(call, 0);
 
     call.type = CreateCount(true);
   } else if (call.func == "sum") {
     bool sign = false;
-    check_assignment(call, true, false, false);
+    if (is_final_pass()) {
+      check_assignment(call, true, false, false);
+    }
     if (check_nargs(call, 1)) {
       check_arg(call, Type::integer, 0);
       sign = call.vargs.at(0)->type.IsSigned();
@@ -1028,7 +1046,9 @@ void SemanticAnalyser::visit(Call &call)
     call.type = CreateSum(sign);
   } else if (call.func == "min") {
     bool sign = false;
-    check_assignment(call, true, false, false);
+    if (is_final_pass()) {
+      check_assignment(call, true, false, false);
+    }
     if (check_nargs(call, 1)) {
       check_arg(call, Type::integer, 0);
       sign = call.vargs.at(0)->type.IsSigned();
@@ -1036,14 +1056,18 @@ void SemanticAnalyser::visit(Call &call)
     call.type = CreateMin(sign);
   } else if (call.func == "max") {
     bool sign = false;
-    check_assignment(call, true, false, false);
+    if (is_final_pass()) {
+      check_assignment(call, true, false, false);
+    }
     if (check_nargs(call, 1)) {
       check_arg(call, Type::integer, 0);
       sign = call.vargs.at(0)->type.IsSigned();
     }
     call.type = CreateMax(sign);
   } else if (call.func == "avg") {
-    check_assignment(call, true, false, false);
+    if (is_final_pass()) {
+      check_assignment(call, true, false, false);
+    }
     if (check_nargs(call, 1)) {
       check_arg(call, Type::integer, 0);
     }

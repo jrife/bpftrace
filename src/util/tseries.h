@@ -60,6 +60,7 @@ std::pair<T, uint64_t> reduce_tseries_value(const std::vector<uint8_t> &values,
     } else if (inner_type.IsAvgTy()) {
       T sum_val = read_data<T>(val);
 
+      // We actually need to preserve both dimensions to aggregate the average
       current.first += sum_val;
       current.second += meta;
     }

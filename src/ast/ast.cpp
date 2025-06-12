@@ -50,7 +50,7 @@ PositionalParameter::PositionalParameter(Diagnostics &d,
 }
 
 Call::Call(Diagnostics &d, std::string func, Location &&loc)
-    : Expression(d, std::move(loc)), func(std::move(func))
+    : Expression(d, std::move(loc)), func(std::move(func)), is_arg(false)
 {
 }
 
@@ -60,7 +60,8 @@ Call::Call(Diagnostics &d,
            Location &&loc)
     : Expression(d, std::move(loc)),
       func(std::move(func)),
-      vargs(std::move(vargs))
+      vargs(std::move(vargs)),
+      is_arg(false)
 {
 }
 
@@ -209,7 +210,7 @@ AssignMapStatement::AssignMapStatement(Diagnostics &d,
     }
     value = block->expr; // Must be non-null if expression.
   };
-  value->map = map;
+  value->map = map; // HERE: map assignment
 };
 
 AssignVarStatement::AssignVarStatement(Diagnostics &d,

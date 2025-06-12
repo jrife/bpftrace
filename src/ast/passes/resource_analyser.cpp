@@ -300,6 +300,11 @@ void ResourceAnalyser::visit(Call &call)
       .inner_type = value_arg.type,
     };
 
+    if (value_arg.map) {
+      LOG(ERROR) << "value arg has map " << value_arg.map->ident;
+      update_map_info(*value_arg.map);
+    }
+
     auto &map_info = resources_.maps_info[call.map->ident];
 
     if (map_info.tseries_args.has_value() && *map_info.tseries_args != args) {
