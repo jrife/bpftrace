@@ -399,6 +399,17 @@ static const std::map<std::string, call_spec> CALL_SPEC = {
         arg_type_spec{ .type=Type::integer, .literal=true },
         arg_type_spec{ .type=Type::integer, .literal=true },
         arg_type_spec{ .type=Type::integer, .literal=true } } } },
+  { "tseries",
+    { .min_args=5,
+      .max_args=5,
+      .arg_types={
+        map_type_spec{
+          .type = std::function<SizedType(const ast::Call&)>([]([[maybe_unused]] const ast::Call &call) -> SizedType { return CreateTSeries(); })
+        },
+        map_key_spec{ .map_index=0 },
+        arg_type_spec{ .skip_check=true }, // Can actually be a map or an integer; defer checking until later.
+        arg_type_spec{ .type=Type::string, .literal=true },
+        arg_type_spec{ .type=Type::integer, .literal=true } } } },
   { "macaddr",
     { .min_args=1,
       .max_args=1,
@@ -664,6 +675,7 @@ static bool IsValidVarDeclType(const SizedType &ty)
     case Type::count_t:
     case Type::hist_t:
     case Type::lhist_t:
+    case Type::tseries_t:
     case Type::max_t:
     case Type::min_t:
     case Type::stats_t:
@@ -1147,6 +1159,7 @@ void SemanticAnalyser::visit(Call &call)
 
   for (size_t i = 0; i < call.vargs.size(); ++i) {
     func_arg_idx_ = i;
+
     visit(call.vargs.at(i));
   }
 
@@ -1225,6 +1238,51 @@ void SemanticAnalyser::visit(Call &call)
             << step->value << " for range " << (max->value - min->value) << ")";
       }
     }
+    call.return_type = CreateLhist();
+  } else if (call.func == "tseries") {
+    const static std::unordered_set<Type> ALLOWED_INNER_CALLS = {
+      Type::avg_t, Type::count_t, Type::sum_t, Type::max_t, Type::min_t,
+    };
+    if (!bpftrace_.config_->enable_tseries) {
+      call.addError() << "tseries is not enabled by default. To enable "
+                         "it, set the tseries config flag to 1.";
+    }
+
+    if (is_final_pass()) {
+      Expression &value_arg = call.vargs.at(2);
+      Expression &interval_arg = call.vargs.at(3);
+      Expression &buckets_arg = call.vargs.at(4);
+
+      auto *inner_call = value_arg.as<Call>();
+      auto &interval = *interval_arg.as<String>();
+      auto *buckets = buckets_arg.as<Integer>();
+
+      if (!value_arg.type().IsIntegerTy() &&
+          (!inner_call ||
+           !ALLOWED_INNER_CALLS.contains(value_arg.type().GetTy()))) {
+        call.addError() << "tseries() value must be an integer or a "
+                           "call to avg, count, max, min, or sum";
+      }
+
+      // ns, us, ms, s
+      std::string interval_re = "^[1-9][0-9]{0,2}[num]?s+$";
+      bool is_valid = std::regex_match(interval.value, std::regex(interval_re));
+      if (!is_valid) {
+        call.addError() << "tseries() expects an interval of format "
+                        << interval_re << " (\"" << interval.value
+                        << "\" provided)";
+        return;
+      }
+
+      if (!buckets) {
+        call.addError() << "tseries() buckets must be >= 1";
+        return;
+      } else if (buckets->value > 1000000) {
+        call.addError() << "tseries() too many buckets, must be <= 1000000";
+      }
+    }
+
+    call.return_type = CreateTSeries();
   } else if (call.func == "count") {
     call.return_type = CreateCount();
   } else if (call.func == "sum") {
@@ -1867,7 +1925,8 @@ void SemanticAnalyser::validate_map_key(const SizedType &key, Node &node)
     node.addError() << "context cannot be used as a map key";
   }
 
-  if (key.IsHistTy() || key.IsLhistTy() || key.IsStatsTy()) {
+  if (key.IsHistTy() || key.IsLhistTy() || key.IsStatsTy() ||
+      key.IsTSeriesTy()) {
     node.addError() << key << " cannot be used as a map key";
   }
 
@@ -3029,6 +3088,7 @@ static const std::unordered_map<Type, std::string_view> AGGREGATE_HINTS{
   { Type::avg_t, "avg(retval)" },
   { Type::hist_t, "hist(retval)" },
   { Type::lhist_t, "lhist(rand %10, 0, 10, 1)" },
+  { Type::tseries_t, "tseries(rand %10, \"10s\", 1)" },
   { Type::stats_t, "stats(arg2)" },
 };
 

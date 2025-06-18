@@ -51,6 +51,13 @@ TEST(Config, set)
   EXPECT_FALSE(bool(config.set("missing_probes", "invalid")));
   EXPECT_TRUE(bool(config.set("missing_probes", "warn")));
   EXPECT_EQ(config.missing_probes, ConfigMissingProbes::warn);
+
+  EXPECT_FALSE(config.enable_tseries);
+  EXPECT_FALSE(bool(config.set("enable_tseries", "invalid")));
+  EXPECT_TRUE(bool(config.set("enable_tseries", "1")));
+  EXPECT_TRUE(bool(config.enable_tseries));
+  EXPECT_TRUE(bool(config.set("enable_tseries", "0")));
+  EXPECT_FALSE(config.enable_tseries);
 }
 
 TEST(Config, key_finding)

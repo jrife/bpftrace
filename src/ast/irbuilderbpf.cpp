@@ -432,6 +432,11 @@ llvm::Type *IRBuilderBPF::GetMapValueType(const SizedType &stype)
     // The second is the count value
     std::vector<llvm::Type *> llvm_elems = { getInt64Ty(), getInt64Ty() };
     ty = GetStructType("avg_stas_val", llvm_elems, false);
+  } else if (stype.IsTSeriesTy()) {
+    std::vector<llvm::Type *> llvm_elems = { getInt64Ty(),
+                                             getInt64Ty(),
+                                             getInt64Ty() };
+    ty = GetStructType("t_series_val", llvm_elems, false);
   } else {
     ty = GetType(stype);
   }
@@ -2215,10 +2220,10 @@ void IRBuilderBPF::CreatePerCpuMapElemInit(Map &map,
   CreateLifetimeEnd(initValue);
 }
 
-void IRBuilderBPF::CreatePerCpuMapElemAdd(Map &map,
-                                          Value *key,
-                                          Value *val,
-                                          const Location &loc)
+Value *IRBuilderBPF::CreatePerCpuMapElemAdd(Map &map,
+                                            Value *key,
+                                            Value *val,
+                                            const Location &loc)
 {
   CallInst *call = CreateMapLookup(map, key);
 
@@ -2245,16 +2250,20 @@ void IRBuilderBPF::CreatePerCpuMapElemAdd(Map &map,
   auto *cast = CreatePtrToInt(call, value->getType(), "cast");
   CreateStore(CreateAdd(CreateLoad(value->getAllocatedType(), cast), val),
               cast);
+  CreateStore(CreateLoad(value->getAllocatedType(), cast), value);
 
   CreateBr(lookup_merge_block);
 
   SetInsertPoint(lookup_failure_block);
 
   CreatePerCpuMapElemInit(map, key, val, loc);
+  CreateStore(val, value);
 
   CreateBr(lookup_merge_block);
   SetInsertPoint(lookup_merge_block);
+  Value *result = CreateLoad(value->getAllocatedType(), value);
   CreateLifetimeEnd(value);
+  return result;
 }
 
 void IRBuilderBPF::CreateDebugOutput(std::string fmt_str,

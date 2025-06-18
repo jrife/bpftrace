@@ -48,7 +48,7 @@ static bool is_aslr_enabled()
 Config::Config(bool has_cmd)
     : user_symbol_cache_type((has_cmd || !is_aslr_enabled())
                                  ? UserSymbolCacheType::per_program
-                                 : UserSymbolCacheType::per_pid) {};
+                                 : UserSymbolCacheType::per_pid){};
 
 static std::string tolower(const std::string &original)
 {
@@ -292,6 +292,7 @@ const std::map<std::string, AnyParser> CONFIG_KEY_MAP = {
   { UNSTABLE_IMPORT, CONFIG_FIELD_PARSER(unstable_import) },
   { UNSTABLE_MACRO, CONFIG_FIELD_PARSER(unstable_macro) },
   { UNSTABLE_MAP_DECL, CONFIG_FIELD_PARSER(unstable_map_decl) },
+  { "enable_tseries", CONFIG_FIELD_PARSER(enable_tseries) },
 };
 
 // These symbols are deprecated, and have been remapped elsewhere.

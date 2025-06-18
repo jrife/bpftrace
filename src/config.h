@@ -64,6 +64,7 @@ public:
   std::string str_trunc_trailer = "..";
   ConfigMissingProbes missing_probes = ConfigMissingProbes::error;
   StackMode stack_mode = StackMode::bpftrace;
+  bool enable_tseries;
 
   // Initialized in the constructor.
   UserSymbolCacheType user_symbol_cache_type;
@@ -76,7 +77,7 @@ public:
 class RenameError : public ErrorInfo<RenameError> {
 public:
   static char ID;
-  RenameError(std::string &&name) : name_(std::move(name)) {};
+  RenameError(std::string &&name) : name_(std::move(name)){};
   void log(llvm::raw_ostream &OS) const override;
 
   // Returns the new key which must be used.

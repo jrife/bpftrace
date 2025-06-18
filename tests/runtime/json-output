@@ -55,6 +55,31 @@ NAME multiple linear histograms
 PROG BEGIN { @stats["bpftrace"] = lhist(2, 0, 100, 10); @stats["curl"] = lhist(50, 0, 100, 10); @stats["bpftrace"] = lhist(1000, 0, 100, 10); exit(); }
 EXPECT_JSON runtime/outputs/lhist_multiple.json
 
+NAME tseries
+PROG config = { enable_tseries = 1 } i:ms:1 { $ticks_per_epoch = 10; $tick_period_ms = 10; $ns_per_ms = 1000000; $max_epochs = 10; $tick = nsecs / ($tick_period_ms * $ns_per_ms); if (@next_tick) { if ($tick < @next_tick) { return; } else if ($tick > @next_tick) { @next_tick = (uint64)0; clear(@a); clear(@c); clear(@i); } } @next_tick = $tick + 1; if (!@i && ($tick % $ticks_per_epoch)) { return; } @a = tseries(@c, "100ms", 5); @c = (@c + 1) % 10; @i++; if (@i / $ticks_per_epoch > $max_epochs) { clear(@next_tick); clear(@c); clear(@i); exit(); } }
+EXPECT_JSON runtime/outputs/tseries.json
+TIMESTAMPS %Y-%m-%dT%H:%M:%S.%kZ 100ms
+
+NAME tseries_min
+PROG config = { enable_tseries = 1 } i:ms:1 { $ticks_per_epoch = 10; $tick_period_ms = 10; $ns_per_ms = 1000000; $max_epochs = 10; $tick = nsecs / ($tick_period_ms * $ns_per_ms); if (@next_tick) { if ($tick < @next_tick) { return; } else if ($tick > @next_tick) { @next_tick = (uint64)0; clear(@a); clear(@c); clear(@i); } } @next_tick = $tick + 1; if (!@i && ($tick % $ticks_per_epoch)) { return; } @a = tseries(min(@c), "100ms", 5); @c = (@c + 1) % 10; @i++; if (@i / $ticks_per_epoch > $max_epochs) { clear(@next_tick); clear(@c); clear(@i); exit(); } }
+EXPECT_JSON runtime/outputs/tseries_min.json
+TIMESTAMPS %Y-%m-%dT%H:%M:%S.%kZ 100ms
+
+NAME tseries_max
+PROG config = { enable_tseries = 1 } i:ms:1 { $ticks_per_epoch = 10; $tick_period_ms = 10; $ns_per_ms = 1000000; $max_epochs = 10; $tick = nsecs / ($tick_period_ms * $ns_per_ms); if (@next_tick) { if ($tick < @next_tick) { return; } else if ($tick > @next_tick) { @next_tick = (uint64)0; clear(@a); clear(@c); clear(@i); } } @next_tick = $tick + 1; if (!@i && ($tick % $ticks_per_epoch)) { return; } @a = tseries(max(@c), "100ms", 5); @c = (@c + 1) % 10; @i++; if (@i / $ticks_per_epoch > $max_epochs) { clear(@next_tick); clear(@c); clear(@i); exit(); } }
+EXPECT_JSON runtime/outputs/tseries_max.json
+TIMESTAMPS %Y-%m-%dT%H:%M:%S.%kZ 100ms
+
+NAME tseries_count
+PROG config = { enable_tseries = 1 } i:ms:1 { $ticks_per_epoch = 10; $tick_period_ms = 10; $ns_per_ms = 1000000; $max_epochs = 10; $tick = nsecs / ($tick_period_ms * $ns_per_ms); if (@next_tick) { if ($tick < @next_tick) { return; } else if ($tick > @next_tick) { @next_tick = (uint64)0; clear(@a); clear(@c); clear(@i); } } @next_tick = $tick + 1; if (!@i && ($tick % $ticks_per_epoch)) { return; } @a = tseries(count(), "100ms", 5); @c = (@c + 1) % 10; @i++; if (@i / $ticks_per_epoch > $max_epochs) { clear(@next_tick); clear(@c); clear(@i); exit(); } }
+EXPECT_JSON runtime/outputs/tseries_count.json
+TIMESTAMPS %Y-%m-%dT%H:%M:%S.%kZ 100ms
+
+NAME tseries_avg
+PROG config = { enable_tseries = 1 } i:ms:1 { $ticks_per_epoch = 10; $tick_period_ms = 10; $ns_per_ms = 1000000; $max_epochs = 10; $tick = nsecs / ($tick_period_ms * $ns_per_ms); if (@next_tick) { if ($tick < @next_tick) { return; } else if ($tick > @next_tick) { @next_tick = (uint64)0; clear(@a); clear(@c); clear(@i); } } @next_tick = $tick + 1; if (!@i && ($tick % $ticks_per_epoch)) { return; } @a = tseries(avg(@c), "100ms", 5); @c = (@c + 1) % 10; @i++; if (@i / $ticks_per_epoch > $max_epochs) { clear(@next_tick); clear(@c); clear(@i); exit(); } }
+EXPECT_JSON runtime/outputs/tseries_avg.json
+TIMESTAMPS %Y-%m-%dT%H:%M:%S.%kZ 100ms
+
 NAME stats
 PROG BEGIN { @stats = stats(2); @stats = stats(10); exit(); }
 EXPECT_JSON runtime/outputs/stats.json

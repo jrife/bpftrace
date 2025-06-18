@@ -5,6 +5,7 @@
 #include "log.h"
 #include "util/exceptions.h"
 #include "util/stats.h"
+#include "util/tseries.h"
 
 namespace bpftrace {
 char BpfMapError::ID = 0;
@@ -186,6 +187,64 @@ Result<HistogramMap> BpfMap::collect_histogram_data(const MapInfo &map_info,
     values_by_key[key_prefix].at(
         bucket) = util::reduce_value<BucketUnit>(value, nvalues);
 
+    old_key = key.data();
+  }
+  return values_by_key;
+}
+
+std::pair<std::vector<uint8_t>, uint64_t> reduce_tseries_value(
+    const std::vector<uint8_t> &values,
+    int nvalues,
+    const SizedType &inner_type)
+{
+  std::pair<std::vector<uint8_t>, uint64_t> result(
+      std::vector<uint8_t>(sizeof(uint64_t)), 0);
+
+  if (inner_type.IsSigned()) {
+    auto v = util::reduce_tseries_value<int64_t>(values, nvalues, inner_type);
+    std::memcpy(result.first.data(), &v.first, sizeof(int64_t));
+    result.second = v.second;
+  } else {
+    auto v = util::reduce_tseries_value<uint64_t>(values, nvalues, inner_type);
+    std::memcpy(result.first.data(), &v.first, sizeof(uint64_t));
+    result.second = v.second;
+  }
+
+  return result;
+}
+
+Result<TSeriesMap> BpfMap::collect_tseries_data(const MapInfo &map_info,
+                                                int nvalues) const
+{
+  uint8_t *old_key = nullptr;
+  auto key = KeyType(key_size_);
+
+  TSeriesMap values_by_key;
+
+  const auto &tseries_args = std::get<TSeriesArgs>(map_info.detail);
+  while (bpf_map_get_next_key(fd(), old_key, key.data()) == 0) {
+    auto key_prefix = std::vector<uint8_t>(map_info.key_type.GetSize());
+
+    for (size_t i = 0; i < map_info.key_type.GetSize(); i++)
+      key_prefix.at(i) = key.at(i);
+
+    auto value = std::vector<uint8_t>(value_size_ * nvalues);
+    int err = bpf_map_lookup_elem(fd(), key.data(), value.data());
+    if (err == -ENOENT) {
+      // key was removed by the eBPF program during bpf_get_next_key() and
+      // bpf_lookup_elem(), let's skip this key
+      continue;
+    } else if (err) {
+      return make_error<BpfMapError>(name_, "lookup", err);
+    }
+
+    if (!values_by_key.contains(key_prefix)) {
+      // New key - create a list of buckets for it
+      values_by_key[key_prefix] = std::map<uint64_t, std::vector<uint8_t>>();
+    }
+
+    auto v = reduce_tseries_value(value, nvalues, tseries_args.inner_type);
+    values_by_key[key_prefix][v.second] = v.first;
     old_key = key.data();
   }
   return values_by_key;

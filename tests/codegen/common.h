@@ -8,6 +8,7 @@
 #include "ast/passes/c_macro_expansion.h"
 #include "ast/passes/clang_parser.h"
 #include "ast/passes/codegen_llvm.h"
+#include "ast/passes/config_analyser.h"
 #include "ast/passes/field_analyser.h"
 #include "ast/passes/fold_literals.h"
 #include "ast/passes/map_sugar.h"
@@ -67,6 +68,7 @@ static void test(BPFtrace &bpftrace,
                 .add(ast::CreateCMacroExpansionPass())
                 .add(ast::CreateFoldLiteralsPass())
                 .add(ast::CreateMapSugarPass())
+                .add(ast::CreateConfigPass())
                 .add(ast::CreateSemanticPass())
                 .add(ast::CreatePidFilterPass())
                 .add(ast::CreateRecursionCheckPass())
