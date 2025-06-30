@@ -63,6 +63,8 @@ and this project adheres to
   - [#4280](https://github.com/bpftrace/bpftrace/pull/4280)
 - Add duration literals - suffixes include: `ns`, `us`, `ms`, `s`, `m`, `h`, `d`
   - [#4317](https://github.com/bpftrace/bpftrace/pull/4317)
+- Introduce `tseries` for capturing time series data
+  - [#3838](https://github.com/bpftrace/bpftrace/pull/3838)
 #### Changed
 - `-p` CLI flag now applies to all probes (except BEGIN/END)
   - [#3800](https://github.com/bpftrace/bpftrace/pull/3800)
