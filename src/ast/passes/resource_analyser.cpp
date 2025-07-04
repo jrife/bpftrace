@@ -1,5 +1,6 @@
 
 #include <algorithm>
+#include <variant>
 
 #include "ast/async_event_types.h"
 #include "ast/codegen_helper.h"
@@ -9,8 +10,10 @@
 #include "ast/visitor.h"
 #include "bpftrace.h"
 #include "log.h"
+#include "map_info.h"
 #include "required_resources.h"
 #include "struct.h"
+#include "types.h"
 
 namespace libbpf {
 #include "libbpf/bpf.h"
@@ -274,6 +277,7 @@ void ResourceAnalyser::visit(Call &call)
     auto &map_info = resources_.maps_info[map->ident];
     if (std::holds_alternative<std::monostate>(map_info.detail)) {
       map_info.detail.emplace<LinearHistogramArgs>(args);
+      update_map_info(*map); // Update max_entries
     } else if (std::holds_alternative<LinearHistogramArgs>(map_info.detail) &&
                std::get<LinearHistogramArgs>(map_info.detail) == args) {
       // Same arguments.
@@ -572,10 +576,20 @@ void ResourceAnalyser::update_map_info(Map &map)
     // hist() and lhist() transparently create additional elements in whatever
     // map they are assigned to. So even if the map looks like it has no keys,
     // multiple keys are necessary.
-    if (!map.type().IsMultiKeyMapTy() && map_info.is_scalar) {
-      map_info.max_entries = 1;
-    } else {
+    if (map_info.bpf_type == libbpf::BPF_MAP_TYPE_PERCPU_HASH ||
+        map_info.bpf_type == libbpf::BPF_MAP_TYPE_HASH) {
       map_info.max_entries = bpftrace_.config_->max_map_keys;
+    } else {
+      if (map.type().IsLhistTy() &&
+          std::holds_alternative<LinearHistogramArgs>(map_info.detail)) {
+        const auto &args = std::get<LinearHistogramArgs>(map_info.detail);
+        map_info.max_entries = 2 + (args.max - args.min) / args.step;
+        map.key_type = CreateNone(); // map_sugar is what sets the original map
+                                     // type to Integer.
+        map_info.key_type = CreateNone();
+      } else {
+        map_info.max_entries = 1;
+      }
     }
   }
 }
