@@ -1,0 +1,45 @@
+// Find out where TCP resets are coming from
+fentry:tcp_reset {
+	// $daddr = args->sk->__sk_common.skc_daddr;
+	// printf("%s (pid = %d, ip = %s) received a TCP reset\n", comm, pid, ntop($daddr));
+}
+
+fentry:tcp_connect {
+	// $daddr = args->sk->__sk_common.skc_daddr;
+
+	// if ($daddr == (uint32)pton("127.0.0.1")) {
+	//	printf("%s (pid = %d) is connecting to localhost\n", comm, pid);
+	// }
+}
+
+// Counting read sizes
+fexit:vfs_read {
+	// @bytes = count();
+	// @bytes[cpu] = count();
+	// @bytes = hist(retval);
+}
+
+// Timing reads by process
+fentry:vfs_read {
+	// @start[tid] = nsecs;
+} 
+
+fexit:vfs_read {
+	// @ns[comm] = hist(nsecs - @start[tid]);
+	// delete(@start, tid);
+}
+
+fexit:vfs_read {
+	// @t = tseries(retval, 100ms, 30, "max");
+}
+
+// with streaming
+interval:ms:100 {
+	// print(@t);
+}
+
+// Cache misses
+hardware:cache-misses {
+	// @[comm,pid] = count();
+	@ = tseries(1, 100ms, 30, "sum");
+}

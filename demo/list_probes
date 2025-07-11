@@ -1,0 +1,2 @@
+sudo ../result/bin/bpftrace -lv 'fentry:tcp_reset'
+sudo ../result/bin/bpftrace -lv 'struct sock'
